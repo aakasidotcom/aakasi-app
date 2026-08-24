@@ -18,10 +18,18 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Grant Execute Permission to Gradlew
-        run: chmod +x gradlew || true
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Ensure Gradle Wrapper Exists
+        run: |
+          if [ ! -f "gradlew" ]; then
+            gradle wrapper --gradle-version 8.11.1 --distribution-type bin
+          fi
+          chmod +x gradlew
 
       - name: Build Release AAB Bundle
         run: ./gradlew :app:bundleRelease --no-daemon
@@ -32,3 +40,4 @@ jobs:
           name: aakasi-release-bundle
           path: app/build/outputs/bundle/release/*.aab
           retention-days: 7
+
