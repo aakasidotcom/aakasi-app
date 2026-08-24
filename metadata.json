@@ -1,0 +1,6 @@
+{
+  "name": "aakasi",
+  "description": "Official mobile app for Aakasi (aakasi.com) with real-time website browsing and Firebase push notification integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
