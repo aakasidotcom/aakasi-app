@@ -24,10 +24,13 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Ensure Gradle Wrapper Exists
+      - name: Ensure Gradle Wrapper and Keystore Exist
         run: |
           gradle wrapper --gradle-version 9.3.1 --distribution-type bin
           chmod +x gradlew
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Aakasi, OU=App, O=Aakasi, C=US"
+          fi
 
       - name: Build Release AAB Bundle
         run: ./gradlew :app:bundleRelease --no-daemon
