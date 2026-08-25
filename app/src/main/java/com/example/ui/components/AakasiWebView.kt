@@ -221,6 +221,17 @@ fun AakasiWebView(
                         super.onPageFinished(view, url)
                         canGoBackState = view?.canGoBack() == true
                         url?.let { onPageFinished(it) }
+
+                        // Inject JS helper so WordPress/WooCommerce frontend can read FCM token or post it to WP backend
+                        view?.evaluateJavascript(
+                            """
+                            (function() {
+                                window.isAakasiApp = true;
+                                window.aakasiAppPlatform = 'android';
+                            })();
+                            """.trimIndent(),
+                            null
+                        )
                     }
 
                     override fun onReceivedError(

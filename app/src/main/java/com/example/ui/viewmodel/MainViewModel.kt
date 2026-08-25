@@ -65,6 +65,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSubscribedToAll = MutableStateFlow(true)
     val isSubscribedToAll: StateFlow<Boolean> = _isSubscribedToAll.asStateFlow()
 
+    private val _isSubscribedToOrders = MutableStateFlow(true)
+    val isSubscribedToOrders: StateFlow<Boolean> = _isSubscribedToOrders.asStateFlow()
+
+    private val _isSubscribedToAdminOrders = MutableStateFlow(false)
+    val isSubscribedToAdminOrders: StateFlow<Boolean> = _isSubscribedToAdminOrders.asStateFlow()
+
     private val _textZoom = MutableStateFlow(100)
     val textZoom: StateFlow<Int> = _textZoom.asStateFlow()
 
@@ -114,7 +120,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: Throwable) {}
 
             fetchFcmToken()
-            subscribeToDefaultTopic()
+            subscribeToDefaultTopics()
         }
     }
 
@@ -172,12 +178,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun subscribeToDefaultTopic() {
+    private fun subscribeToDefaultTopics() {
         try {
             repository.subscribeToTopic("all_users") { success ->
                 _isSubscribedToAll.value = success
             }
-        } catch (e: Throwable) {
+            repository.subscribeToTopic("orders") { success ->
+                _isSubscribedToOrders.value = success
+            }
+        } catch (_: Throwable) {
             _isSubscribedToAll.value = false
         }
     }
@@ -190,6 +199,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             repository.unsubscribeFromTopic("all_users") { success ->
                 _isSubscribedToAll.value = !success
+            }
+        }
+    }
+
+    fun toggleOrdersSubscription(subscribe: Boolean) {
+        if (subscribe) {
+            repository.subscribeToTopic("orders") { success ->
+                _isSubscribedToOrders.value = success
+            }
+        } else {
+            repository.unsubscribeFromTopic("orders") { success ->
+                _isSubscribedToOrders.value = !success
+            }
+        }
+    }
+
+    fun toggleAdminOrdersSubscription(subscribe: Boolean) {
+        if (subscribe) {
+            repository.subscribeToTopic("admin_orders") { success ->
+                _isSubscribedToAdminOrders.value = success
+            }
+        } else {
+            repository.unsubscribeFromTopic("admin_orders") { success ->
+                _isSubscribedToAdminOrders.value = !success
             }
         }
     }

@@ -35,10 +35,17 @@ jobs:
       - name: Build Release AAB Bundle
         run: ./gradlew :app:bundleRelease --no-daemon
 
+      - name: Locate AAB and APK files
+        run: |
+          find . -name "*.aab" -o -name "*.apk"
+
       - name: Upload Release AAB Artifact
         uses: actions/upload-artifact@v4
         with:
           name: aakasi-release-bundle
-          path: app/build/outputs/bundle/release/*.aab
+          path: |
+            app/build/outputs/bundle/**/*.aab
+            **/outputs/**/*.aab
+          if-no-files-found: error
           retention-days: 7
 

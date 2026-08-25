@@ -69,6 +69,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     val fcmToken by viewModel.fcmToken.collectAsState()
     val isSubscribedToAll by viewModel.isSubscribedToAll.collectAsState()
+    val isSubscribedToOrders by viewModel.isSubscribedToOrders.collectAsState()
+    val isSubscribedToAdminOrders by viewModel.isSubscribedToAdminOrders.collectAsState()
     val textZoom by viewModel.textZoom.collectAsState()
 
     Scaffold(
@@ -150,6 +152,60 @@ fun SettingsScreen(
                             checked = isSubscribedToAll,
                             onCheckedChange = { checked ->
                                 viewModel.toggleTopicSubscription(checked)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "WooCommerce Customer Orders",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Receive instant status alerts and delivery updates for your orders",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isSubscribedToOrders,
+                            onCheckedChange = { checked ->
+                                viewModel.toggleOrdersSubscription(checked)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Store Admin Order Alerts",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Receive instant push notifications whenever a new purchase is made",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isSubscribedToAdminOrders,
+                            onCheckedChange = { checked ->
+                                viewModel.toggleAdminOrdersSubscription(checked)
                             }
                         )
                     }
@@ -236,6 +292,16 @@ fun SettingsScreen(
                             text = "• Topic: all_users (${if (isSubscribedToAll) "Subscribed" else "Unsubscribed"})",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isSubscribedToAll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "• Topic: orders (${if (isSubscribedToOrders) "Subscribed" else "Unsubscribed"})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSubscribedToOrders) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "• Topic: admin_orders (${if (isSubscribedToAdminOrders) "Subscribed" else "Unsubscribed"})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSubscribedToAdminOrders) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         )
                     }
 

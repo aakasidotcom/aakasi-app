@@ -1,18 +1,25 @@
 package com.example.ui.screens
 
+import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,13 +29,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.ImageLoader
+import coil.compose.AsyncImage
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
+import coil.request.ImageRequest
 import com.example.R
 import com.example.ui.components.AakasiWebView
 import com.example.ui.components.WebViewController
@@ -41,6 +53,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val currentUrl by viewModel.currentUrl.collectAsState()
     val navigationEvent by viewModel.navigationEvent.collectAsState()
     val errorState by viewModel.errorState.collectAsState()
@@ -48,9 +61,22 @@ fun HomeScreen(
     val reloadTrigger by viewModel.reloadTrigger.collectAsState()
     val textZoom by viewModel.textZoom.collectAsState()
 
+    val isLoading by viewModel.isLoading.collectAsState()
     val isInitialAppLoading by viewModel.isInitialAppLoading.collectAsState()
 
     val webViewController = remember { WebViewController() }
+
+    val imageLoader = remember(context) {
+        ImageLoader.Builder(context)
+            .components {
+                if (Build.VERSION.SDK_INT >= 28) {
+                    add(ImageDecoderDecoder.Factory())
+                } else {
+                    add(GifDecoder.Factory())
+                }
+            }
+            .build()
+    }
 
     // Handle deep link / push notification URL navigation events
     LaunchedEffect(navigationEvent) {
@@ -89,8 +115,37 @@ fun HomeScreen(
             textZoomPercent = textZoom
         )
 
-        // Loading Screen with exact aakasi_app_splash_screen only for app initial open (splash screen)
-        if (isInitialAppLoading && !isOffline && errorState == null) {
+        // Small GIF loader centered on screen during page loading (NOT shown during initial splash screen)
+        AnimatedVisibility(
+            visible = isLoading && !isInitialAppLoading && !isOffline && errorState == null,
+            enter = fadeIn(animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(150)),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color.Transparent),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(R.drawable.aakasi_app_loader)
+                        .build(),
+                    imageLoader = imageLoader,
+                    contentDescription = "Loading...",
+                    modifier = Modifier.size(48.dp),
+                    contentScale = ContentScale.Fit
+                )
+            }
+        }
+
+        // Loading Screen with exact aakasi_app_splash_screen only once for app initial open
+        AnimatedVisibility(
+            visible = isInitialAppLoading && !isOffline && errorState == null,
+            enter = EnterTransition.None,
+            exit = fadeOut(animationSpec = tween(250))
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -98,7 +153,7 @@ fun HomeScreen(
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.aakasi_app_splash_screen),
-                    contentDescription = "Loading",
+                    contentDescription = "Splash Screen",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )

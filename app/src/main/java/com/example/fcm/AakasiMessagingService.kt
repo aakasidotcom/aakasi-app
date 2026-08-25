@@ -31,29 +31,40 @@ class AakasiMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(remoteMessage)
         Log.d("AakasiFCM", "From: ${remoteMessage.from}")
 
+        val isOrderNotification = remoteMessage.data["type"] == "woocommerce_order" ||
+                remoteMessage.data.containsKey("order_id") ||
+                remoteMessage.data["channel"] == "orders" ||
+                remoteMessage.from?.contains("orders") == true ||
+                remoteMessage.from?.contains("admin_orders") == true
+
+        val defaultTitle = if (isOrderNotification) "🛍️ Order Update" else "Aakasi Update"
         val title = remoteMessage.notification?.title
             ?: remoteMessage.data["title"]
             ?: remoteMessage.data["heading"]
-            ?: "Aakasi Update"
+            ?: defaultTitle
 
         val body = remoteMessage.notification?.body
             ?: remoteMessage.data["body"]
             ?: remoteMessage.data["message"]
             ?: remoteMessage.data["content"]
             ?: remoteMessage.data["text"]
-            ?: "New content available on Aakasi"
+            ?: if (isOrderNotification) "You have an order update on Aakasi" else "New content available on Aakasi"
 
         val targetUrl = remoteMessage.data["url"]
             ?: remoteMessage.data["link"]
             ?: remoteMessage.data["target_url"]
             ?: remoteMessage.data["click_action"]
-            ?: "https://www.aakasi.com"
+            ?: if (isOrderNotification && remoteMessage.data.containsKey("order_id")) {
+                "https://www.aakasi.com/my-account/view-order/${remoteMessage.data["order_id"]}"
+            } else {
+                "https://www.aakasi.com"
+            }
 
         // Save to Room DB
         saveNotificationToDb(title, body, targetUrl)
 
         // Display Notification in System Bar
-        showNotification(title, body, targetUrl)
+        showNotification(title, body, targetUrl, isOrderNotification)
     }
 
     private fun saveNotificationToDb(title: String, body: String, url: String) {
@@ -73,19 +84,28 @@ class AakasiMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun showNotification(title: String, body: String, targetUrl: String) {
-        val channelId = "aakasi_notifications"
+    private fun showNotification(title: String, body: String, targetUrl: String, isOrderNotification: Boolean = false) {
+        val channelId = if (isOrderNotification) "aakasi_orders" else "aakasi_notifications"
+        val channelName = if (isOrderNotification) "WooCommerce Order Alerts" else "Aakasi News & Updates"
+        val channelDescription = if (isOrderNotification) {
+            "Real-time notifications for new orders, status changes, and customer purchases"
+        } else {
+            "Notifications for latest posts, news and updates from Aakasi"
+        }
+
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Aakasi News & Updates",
+                channelName,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifications for latest posts, news and updates from Aakasi"
+                description = channelDescription
                 enableVibration(true)
+                setShowBadge(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -112,8 +132,9 @@ class AakasiMessagingService : FirebaseMessagingService() {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setCategory(if (isOrderNotification) NotificationCompat.CATEGORY_EVENT else NotificationCompat.CATEGORY_MESSAGE)
             .setContentIntent(pendingIntent)
 
         notificationManager.notify(System.currentTimeMillis().toInt(), notificationBuilder.build())
