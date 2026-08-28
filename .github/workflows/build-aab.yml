@@ -46,13 +46,14 @@ jobs:
           # Decode Release Keystore if provided in GitHub Secrets
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "[INFO] Decoding production release keystore from GitHub Secret RELEASE_KEYSTORE_BASE64..."
-            echo "$KEYSTORE_BASE64" | base64 --decode > my-upload-key.jks
-          else
-            echo "[INFO] No RELEASE_KEYSTORE_BASE64 secret provided. Falling back to default keystore..."
-            if [ ! -f "debug.keystore" ]; then
-              keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Aakasi, OU=App, O=Aakasi, C=US"
-            fi
+            echo "$KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
           fi
+
+          # Ensure debug.keystore exists in root and standard Android SDK location
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Aakasi, OU=App, O=Aakasi, C=US"
+          fi
+          mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore || true
 
       - name: Build Release Bundle (AAB) and APKs
         env:

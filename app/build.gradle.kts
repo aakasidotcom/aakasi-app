@@ -29,25 +29,23 @@ android {
 
   signingConfigs {
     create("release") {
-      val customKeystorePath = System.getenv("KEYSTORE_PATH")
+      val customKeystorePath = System.getenv("KEYSTORE_PATH") ?: System.getenv("RELEASE_STORE_FILE")
       val customKeystoreFile = if (customKeystorePath != null) file(customKeystorePath) else file("${rootDir}/my-upload-key.jks")
-      if (customKeystoreFile.exists() && System.getenv("STORE_PASSWORD") != null) {
+      val storePass = System.getenv("STORE_PASSWORD") ?: System.getenv("RELEASE_STORE_PASSWORD")
+      if (customKeystoreFile.exists() && storePass != null) {
         storeFile = customKeystoreFile
-        storePassword = System.getenv("STORE_PASSWORD")
-        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-        keyPassword = System.getenv("KEY_PASSWORD") ?: System.getenv("STORE_PASSWORD")
+        storePassword = storePass
+        keyAlias = System.getenv("KEY_ALIAS") ?: System.getenv("RELEASE_KEY_ALIAS") ?: "upload"
+        keyPassword = System.getenv("KEY_PASSWORD") ?: System.getenv("RELEASE_KEY_PASSWORD") ?: storePass
       } else {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
+        val localDebug = file("${rootDir}/debug.keystore")
+        if (localDebug.exists()) {
+          storeFile = localDebug
+          storePassword = "android"
+          keyAlias = "androiddebugkey"
+          keyPassword = "android"
+        }
       }
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
     }
   }
 
@@ -59,7 +57,9 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      // Uses default Android Gradle Plugin debug signing automatically
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
