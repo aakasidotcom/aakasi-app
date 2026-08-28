@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
 import android.webkit.GeolocationPermissions
+import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -70,6 +71,7 @@ fun AakasiWebView(
     onProgressChanged: (Int) -> Unit,
     onTitleReceived: (String) -> Unit,
     onPageStarted: (String) -> Unit,
+    onPageCommitVisible: (String) -> Unit = {},
     onPageFinished: (String) -> Unit,
     onErrorReceived: (String) -> Unit,
     textZoomPercent: Int = 100,
@@ -117,8 +119,13 @@ fun AakasiWebView(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
 
-                // Optimize rendering for low to high-end devices
+                // Optimize rendering and scrolling for low to high-end devices
                 setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                isVerticalScrollBarEnabled = true
+                isHorizontalScrollBarEnabled = false
+                scrollBarStyle = android.view.View.SCROLLBARS_INSIDE_OVERLAY
+                overScrollMode = android.view.View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                isNestedScrollingEnabled = true
 
                 settings.apply {
                     javaScriptEnabled = true
@@ -144,6 +151,13 @@ fun AakasiWebView(
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
+                // 2. Bridge so your page's JS can trigger Android's NATIVE share sheet
+                val shareBridge = AndroidShareBridge(ctx)
+                addJavascriptInterface(shareBridge, "AndroidShare")
+                addJavascriptInterface(shareBridge, "Android")
+
+                // 1. Intercept outgoing links so wa.me / t.me / twitter.com / facebook.com
+                //    open the actual installed apps instead of loading inside the WebView.
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
@@ -181,26 +195,49 @@ fun AakasiWebView(
                             }
                         }
 
-                        // Handle external HTTP/HTTPS links in external browser / apps
+                        // External hosts: wa.me, t.me, twitter.com, x.com, facebook.com, etc.
+                        val externalHosts = listOf(
+                            "wa.me",
+                            "api.whatsapp.com",
+                            "whatsapp.com",
+                            "t.me",
+                            "telegram.me",
+                            "twitter.com",
+                            "x.com",
+                            "facebook.com",
+                            "fb.me",
+                            "instagram.com",
+                            "play.google.com",
+                            "youtube.com",
+                            "youtu.be",
+                            "maps.google.com"
+                        )
+
+                        val shouldOpenExternally = externalHosts.any { requestUrl.contains(it) }
+
+                        if (shouldOpenExternally) {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(requestUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                ctx.startActivity(intent)
+                            } catch (e: Exception) {
+                                // Target app not installed (e.g. WhatsApp missing) -
+                                // fall back to loading the web version instead.
+                                view?.loadUrl(requestUrl)
+                            }
+                            return true // tell WebView we handled it, don't load it internally
+                        }
+
+                        // Handle other external HTTP/HTTPS links
                         val host = uri.host?.lowercase() ?: ""
                         val isInternalHost = host == "aakasi.com" || host.endsWith(".aakasi.com") || host == "www.aakasi.com"
 
-                        val isExternalAppDomain = host.contains("play.google.com") ||
-                                host.contains("youtube.com") ||
-                                host.contains("youtu.be") ||
-                                host.contains("facebook.com") ||
-                                host.contains("instagram.com") ||
-                                host.contains("twitter.com") ||
-                                host.contains("x.com") ||
-                                host.contains("t.me") ||
-                                host.contains("telegram.me") ||
-                                host.contains("whatsapp.com") ||
-                                host.contains("maps.google.com")
-
-                        if (!isInternalHost || isExternalAppDomain) {
+                        if (!isInternalHost) {
                             return try {
-                                val externalIntent = Intent(Intent.ACTION_VIEW, uri)
-                                externalIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                val externalIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
                                 ctx.startActivity(externalIntent)
                                 true
                             } catch (e: Exception) {
@@ -208,6 +245,8 @@ fun AakasiWebView(
                             }
                         }
 
+                        // Internal page navigation -> trigger page loader immediately
+                        onPageStarted(requestUrl)
                         return false
                     }
 
@@ -215,12 +254,43 @@ fun AakasiWebView(
                         super.onPageStarted(view, url, favicon)
                         canGoBackState = view?.canGoBack() == true
                         url?.let { onPageStarted(it) }
+
+                        // Polyfill Web Share API (navigator.share) to hook into AndroidShare bridge
+                        val sharePolyfill = """
+                            (function() {
+                                if (window.AndroidShare) {
+                                    window.navigator.share = function(data) {
+                                        return new Promise(function(resolve, reject) {
+                                            try {
+                                                var text = (data && data.text) || (data && data.title) || '';
+                                                var url = (data && data.url) || '';
+                                                window.AndroidShare.share(text, url);
+                                                resolve();
+                                            } catch (e) {
+                                                reject(e);
+                                            }
+                                        });
+                                    };
+                                    if (window.navigator.canShare) {
+                                        window.navigator.canShare = function() { return true; };
+                                    }
+                                }
+                            })();
+                        """.trimIndent()
+                        view?.evaluateJavascript(sharePolyfill, null)
+                    }
+
+                    override fun onPageCommitVisible(view: WebView?, url: String?) {
+                        super.onPageCommitVisible(view, url)
+                        url?.let { onPageCommitVisible(it) }
+                        injectSmoothScroll(view)
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         canGoBackState = view?.canGoBack() == true
                         url?.let { onPageFinished(it) }
+                        injectSmoothScroll(view)
 
                         // Inject JS helper so WordPress/WooCommerce frontend can read FCM token or post it to WP backend
                         view?.evaluateJavascript(
@@ -232,6 +302,22 @@ fun AakasiWebView(
                             """.trimIndent(),
                             null
                         )
+                    }
+
+                    private fun injectSmoothScroll(view: WebView?) {
+                        val js = """
+                            (function() {
+                                try {
+                                    if (!document.getElementById('aakasi-smooth-scroll-style')) {
+                                        var style = document.createElement('style');
+                                        style.id = 'aakasi-smooth-scroll-style';
+                                        style.innerHTML = 'html, body { scroll-behavior: smooth !important; -webkit-overflow-scrolling: touch !important; }';
+                                        (document.head || document.documentElement).appendChild(style);
+                                    }
+                                } catch(e) {}
+                            })();
+                        """.trimIndent()
+                        view?.evaluateJavascript(js, null)
                     }
 
                     override fun onReceivedError(
@@ -373,5 +459,85 @@ fun AakasiWebView(
         },
         modifier = modifier.fillMaxSize()
     )
+}
+
+/**
+ * Bridge class so the page's JS can trigger Android's NATIVE share sheet
+ * via window.AndroidShare.share(text, url) or window.Android.share(text, url)
+ */
+class AndroidShareBridge(private val context: Context) {
+
+    private fun formatUrlWithAppRef(url: String): String {
+        if (url.isBlank()) return url
+        return try {
+            val uri = Uri.parse(url)
+            val host = uri.host?.lowercase() ?: ""
+            if (host == "aakasi.com" || host.endsWith(".aakasi.com")) {
+                if (uri.getQueryParameter("ref") == null) {
+                    uri.buildUpon().appendQueryParameter("ref", "app").build().toString()
+                } else {
+                    url
+                }
+            } else {
+                url
+            }
+        } catch (_: Exception) {
+            url
+        }
+    }
+
+    @JavascriptInterface
+    fun share(text: String, url: String) {
+        val formattedUrl = formatUrlWithAppRef(url)
+        val shareBody = if (formattedUrl.isNotBlank() && text.isNotBlank()) {
+            "$text\n$formattedUrl"
+        } else {
+            text.ifBlank { formattedUrl }
+        }
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, shareBody)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share via").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    }
+
+    @JavascriptInterface
+    fun share(text: String) {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share via").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    }
+
+    @JavascriptInterface
+    fun share(title: String?, text: String?, url: String?) {
+        val formattedUrl = if (!url.isNullOrBlank()) formatUrlWithAppRef(url) else url
+        val shareBody = buildString {
+            if (!text.isNullOrBlank()) append(text)
+            if (!formattedUrl.isNullOrBlank()) {
+                if (isNotEmpty()) append("\n")
+                append(formattedUrl)
+            }
+        }
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, shareBody)
+            if (!title.isNullOrBlank()) putExtra(Intent.EXTRA_SUBJECT, title)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share via").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    }
 }
 

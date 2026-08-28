@@ -112,6 +112,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Display initial splash screen image for 3 seconds
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(3000)
+            _isInitialAppLoading.value = false
+        }
+
         // Initialize FCM asynchronously with safe delay
         viewModelScope.launch {
             try {
@@ -127,16 +133,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadUrl(url: String) {
         _errorState.value = null
         _currentUrl.value = url
+        _isLoading.value = true
+        _loadProgress.value = 0
         _navigationEvent.value = url
     }
 
-    fun onWebPageNavigated(url: String) {
+    fun onPageStarted(url: String) {
         _currentUrl.value = url
+        _isLoading.value = true
+        _loadProgress.value = 0
+    }
+
+    fun onPageCommitVisible(url: String) {
+        _currentUrl.value = url
+        // Page has started rendering visible content -> stop page loader gif
+        _isLoading.value = false
+    }
+
+    fun onWebPageNavigated(url: String) {
+        onPageStarted(url)
     }
 
     fun onPageFinished(url: String) {
         _currentUrl.value = url
-        _isInitialAppLoading.value = false
+        _isLoading.value = false
     }
 
     fun clearNavigationEvent() {
@@ -145,9 +165,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateProgress(progress: Int) {
         _loadProgress.value = progress
-        _isLoading.value = progress < 100
-        if (progress >= 60) {
-            _isInitialAppLoading.value = false
+        // Dismiss loader GIF if progress reaches 25% or higher
+        if (progress >= 25) {
+            _isLoading.value = false
         }
     }
 
@@ -159,8 +179,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setError(errorMessage: String) {
         _errorState.value = errorMessage
-        _isLoading.value = false
         _isInitialAppLoading.value = false
+        _isLoading.value = false
     }
 
     fun clearError() {

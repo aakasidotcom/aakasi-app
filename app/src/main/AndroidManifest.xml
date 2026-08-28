@@ -26,6 +26,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:label="@string/app_name"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:theme="@style/Theme.MyApplication">
@@ -35,12 +36,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Intent filter for opening web links or custom schemes -->
-            <intent-filter>
+            <!-- App Links: autoVerify=true enables verified domain handling for aakasi.com -->
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="aakasi.com" />
                 <data android:scheme="https" android:host="www.aakasi.com" />
+                <data android:scheme="http" android:host="aakasi.com" />
                 <data android:scheme="http" android:host="www.aakasi.com" />
             </intent-filter>
         </activity>

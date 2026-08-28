@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -109,17 +110,18 @@ fun HomeScreen(
             controller = webViewController,
             onProgressChanged = { progress -> viewModel.updateProgress(progress) },
             onTitleReceived = { title -> viewModel.updateTitle(title) },
-            onPageStarted = { url -> viewModel.onWebPageNavigated(url) },
+            onPageStarted = { url -> viewModel.onPageStarted(url) },
+            onPageCommitVisible = { url -> viewModel.onPageCommitVisible(url) },
             onPageFinished = { url -> viewModel.onPageFinished(url) },
             onErrorReceived = { errorMsg -> viewModel.setError(errorMsg) },
             textZoomPercent = textZoom
         )
 
-        // Small GIF loader centered on screen during page loading (NOT shown during initial splash screen)
+        // Small GIF loader centered on screen during page loading (stops when page reaches 1% loaded)
         AnimatedVisibility(
             visible = isLoading && !isInitialAppLoading && !isOffline && errorState == null,
-            enter = fadeIn(animationSpec = tween(150)),
-            exit = fadeOut(animationSpec = tween(150)),
+            enter = EnterTransition.None,
+            exit = ExitTransition.None,
             modifier = Modifier.align(Alignment.Center)
         ) {
             Box(
@@ -136,26 +138,6 @@ fun HomeScreen(
                     contentDescription = "Loading...",
                     modifier = Modifier.size(48.dp),
                     contentScale = ContentScale.Fit
-                )
-            }
-        }
-
-        // Loading Screen with exact aakasi_app_splash_screen only once for app initial open
-        AnimatedVisibility(
-            visible = isInitialAppLoading && !isOffline && errorState == null,
-            enter = EnterTransition.None,
-            exit = fadeOut(animationSpec = tween(250))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.White)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.aakasi_app_splash_screen),
-                    contentDescription = "Splash Screen",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
                 )
             }
         }
