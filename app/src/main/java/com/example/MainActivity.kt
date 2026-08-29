@@ -1,5 +1,6 @@
 package com.example
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -16,7 +17,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ImageView
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
 import coil.decode.GifDecoder
@@ -37,6 +40,14 @@ class MainActivity : AppCompatActivity() {
 
     private var wasOffline = false
     private var lastUrl: String = "https://www.aakasi.com/"
+    private var splashShown = false
+
+    // Register Notification Permission Launcher for Android 13+ (API 33+)
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        // Permission result handled
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,8 +63,15 @@ class MainActivity : AppCompatActivity() {
         // Setup animated GIF loader
         setupPageLoader()
 
-        // Splash screen with 3 seconds delay
-        setupSplashScreen()
+        // Splash screen with 3 seconds delay (only on fresh launch)
+        if (savedInstanceState == null && !splashShown) {
+            setupSplashScreen()
+        } else {
+            splashView.visibility = View.GONE
+        }
+
+        // Ask for Notification Permission on initial launch
+        askNotificationPermission()
 
         // Configure WebView settings
         webView.settings.apply {
@@ -86,8 +104,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 url?.let { lastUrl = it }
-                if (networkMonitor.isCurrentlyConnected()) {
-                    offlineView.visibility = View.GONE
+                if (networkMonitor.isCurrentlyConnected() && offlineView.visibility != View.VISIBLE) {
                     if (splashView.visibility != View.VISIBLE) {
                         pageLoader.visibility = View.VISIBLE
                     }
@@ -121,7 +138,7 @@ class MainActivity : AppCompatActivity() {
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
-                if (newProgress >= 25) {
+                if (newProgress >= 1) {
                     pageLoader.visibility = View.GONE
                 }
             }
@@ -152,7 +169,20 @@ class MainActivity : AppCompatActivity() {
         handleIncomingIntent(intent)
     }
 
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     private fun setupSplashScreen() {
+        splashShown = true
         splashView.visibility = View.VISIBLE
         lifecycleScope.launch {
             delay(3000)
