@@ -26,26 +26,32 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask"
-            android:label="@string/app_name"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
-            android:theme="@style/Theme.MyApplication">
+            android:launchMode="singleTask">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- App Links: autoVerify=true enables verified domain handling for aakasi.com -->
+            <!--
+              Domain-wide App Link. When the app is installed AND the domain is
+              verified (via assetlinks.json), Android will route ANY
+              https://aakasi.com/... link straight to this app — no browser
+              involved at all. If the app is NOT installed, Android has no
+              candidate to route to, so it opens the browser automatically.
+              This is native OS behavior — no app-side "forward to browser"
+              logic should ever be written, that's what caused the loop.
+            -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="aakasi.com" />
-                <data android:scheme="https" android:host="www.aakasi.com" />
-                <data android:scheme="http" android:host="aakasi.com" />
-                <data android:scheme="http" android:host="www.aakasi.com" />
+
+                <data
+                    android:scheme="https"
+                    android:host="aakasi.com" />
             </intent-filter>
+
         </activity>
 
         <service

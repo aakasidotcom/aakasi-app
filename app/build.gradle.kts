@@ -17,8 +17,8 @@ android {
     applicationId = "aakasi.com"
     minSdk = 23
     targetSdk = 35
-    versionCode = 2
-    versionName = "2.0"
+    versionCode = 3
+    versionName = "3.0"
 
     vectorDrawables {
       useSupportLibrary = true
@@ -92,6 +92,7 @@ dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
+  implementation(libs.androidx.appcompat)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
   // implementation(libs.androidx.camera.core)

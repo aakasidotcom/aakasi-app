@@ -1,5 +1,6 @@
 [versions]
 agp = "9.1.1"
+appcompat = "1.7.0"
 coreKtx = "1.15.0"
 coreSplashscreen = "1.0.1"
 junit = "4.13.2"
@@ -45,6 +46,7 @@ googleid = "1.1.1"
 
 
 [libraries]
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
