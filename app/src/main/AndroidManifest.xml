@@ -41,13 +41,14 @@
             </intent-filter>
 
             <!--
-              Domain-wide App Link. When the app is installed AND the domain is
-              verified (via assetlinks.json), Android will route ANY
-              https://aakasi.com/... link straight to this app — no browser
-              involved at all. If the app is NOT installed, Android has no
-              candidate to route to, so it opens the browser automatically.
-              This is native OS behavior — no app-side "forward to browser"
-              logic should ever be written, that's what caused the loop.
+              Only www.aakasi.com is declared here. aakasi.com (no www) redirects
+              to www.aakasi.com at the server level, which means Google's
+              verification check can never succeed for it directly
+              (ERROR_CODE_REDIRECT) — Android checks assetlinks.json at the
+              exact host in the link, before any redirect happens. So the
+              bare aakasi.com host is intentionally NOT listed; including it
+              would only add an unverifiable host that can't grant app-open
+              behavior anyway.
             -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
@@ -56,7 +57,7 @@
 
                 <data
                     android:scheme="https"
-                    android:host="aakasi.com" />
+                    android:host="www.aakasi.com" />
             </intent-filter>
 
         </activity>
