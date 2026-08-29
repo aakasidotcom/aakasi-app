@@ -20,6 +20,10 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webview)
         webView.settings.javaScriptEnabled = true
+        // TEMPORARY DEBUG — forces WebView to always fetch fresh content
+        // instead of a cached copy, so JS edits on the site show up
+        // immediately. Remove/relax this once testing is done.
+        webView.settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
@@ -127,6 +131,10 @@ class MainActivity : AppCompatActivity() {
     inner class AndroidShareBridge(private val activity: AppCompatActivity) {
         @JavascriptInterface
         fun share(text: String, url: String) {
+            // TEMPORARY DEBUG — remove after confirming ?ref=app appears.
+            // Shows exactly what URL string the bridge actually received.
+            android.widget.Toast.makeText(activity, "DEBUG url: $url", android.widget.Toast.LENGTH_LONG).show()
+
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, "$text\n$url")
