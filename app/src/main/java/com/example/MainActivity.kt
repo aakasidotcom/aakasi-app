@@ -78,6 +78,43 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
+            allowFileAccess = true
+            allowContentAccess = true
+            useWideViewPort = false
+            loadWithOverviewMode = false
+            textZoom = 100
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            setSupportMultipleWindows(false)
+            javaScriptCanOpenWindowsAutomatically = true
+            mediaPlaybackRequiresUserGesture = false
+            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+            // Clean User Agent:
+            // Razorpay Checkout JS checks for '; wv' and 'Version/X.X' in navigator.userAgent.
+            // If detected as WebView, Razorpay suppresses UPI Intent options entirely.
+            // Stripping '; wv' and 'Version/X.X' allows Razorpay to render all UPI payment options.
+            val rawUa = userAgentString
+            val cleanedUa = rawUa
+                .replace("; wv", "")
+                .replace("; wv;", ";")
+                .replace(Regex("Version/\\d+(\\.\\d+)*\\s*"), "")
+            userAgentString = cleanedUa
+        }
+
+        // Enable third-party cookies for payment gateway iframes & 3DS authorization
+        android.webkit.CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
+
+        // Make offline view clickable so user can tap anywhere on it to retry
+        offlineView.setOnClickListener {
+            if (networkMonitor.isCurrentlyConnected()) {
+                offlineView.visibility = View.GONE
+                reloadWebView()
+            }
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -86,6 +123,53 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest
             ): Boolean {
                 val url = request.url.toString()
+                return handleUrlLoading(view, url)
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                return handleUrlLoading(view, url)
+            }
+
+            private fun handleUrlLoading(view: WebView, url: String): Boolean {
+                // Direct UPI and payment app schemes (GPay, PhonePe, Paytm, BHIM, CRED, Tez, etc.)
+                val upiSchemes = listOf("upi://", "tez://", "phonepe://", "paytmmp://", "credpay://", "bhim://", "gpay://", "mobikwik://", "freecharge://", "payzapp://")
+                if (upiSchemes.any { url.startsWith(it, ignoreCase = true) }) {
+                    return try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        true
+                    } catch (e: Exception) {
+                        true
+                    }
+                }
+
+                // Razorpay and custom app intent URLs
+                if (url.startsWith("intent://", ignoreCase = true)) {
+                    return try {
+                        val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                        if (intent.resolveActivity(packageManager) != null) {
+                            startActivity(intent)
+                        } else {
+                            val fallbackUrl = intent.getStringExtra("browser_fallback_url")
+                            if (!fallbackUrl.isNullOrEmpty()) {
+                                view.loadUrl(fallbackUrl)
+                            }
+                        }
+                        true
+                    } catch (e: Exception) {
+                        true
+                    }
+                }
+
+                if (url.startsWith("market://", ignoreCase = true)) {
+                    return try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        true
+                    } catch (e: Exception) {
+                        true
+                    }
+                }
+
                 val externalHosts = listOf("wa.me", "t.me", "twitter.com", "x.com", "facebook.com")
                 val isExternalApp = externalHosts.any { url.contains(it) }
 
@@ -103,11 +187,20 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                url?.let { lastUrl = it }
-                if (networkMonitor.isCurrentlyConnected() && offlineView.visibility != View.VISIBLE) {
+                url?.let {
+                    if (it != "about:blank" && !it.startsWith("data:")) {
+                        lastUrl = it
+                    }
+                }
+                if (networkMonitor.isCurrentlyConnected()) {
+                    offlineView.visibility = View.GONE
                     if (splashView.visibility != View.VISIBLE) {
                         pageLoader.visibility = View.VISIBLE
                     }
+                } else {
+                    pageLoader.visibility = View.GONE
+                    offlineView.visibility = View.VISIBLE
+                    wasOffline = true
                 }
             }
 
@@ -128,10 +221,19 @@ class MainActivity : AppCompatActivity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
-                    pageLoader.visibility = View.GONE
-                    offlineView.visibility = View.VISIBLE
-                    wasOffline = true
+                    showOfflineScreen()
                 }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onReceivedError(
+                view: WebView?,
+                errorCode: Int,
+                description: String?,
+                failingUrl: String?
+            ) {
+                super.onReceivedError(view, errorCode, description, failingUrl)
+                showOfflineScreen()
             }
         }
 
@@ -166,7 +268,36 @@ class MainActivity : AppCompatActivity() {
         // Setup Network Monitoring and Auto-Reload
         setupNetworkMonitoring()
 
+        // Check initial connectivity immediately
+        if (!networkMonitor.isCurrentlyConnected()) {
+            showOfflineScreen()
+        }
+
         handleIncomingIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        webView.onResume()
+        webView.resumeTimers()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        webView.onPause()
+        webView.pauseTimers()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        webView.destroy()
+    }
+
+    private fun showOfflineScreen() {
+        wasOffline = true
+        pageLoader.visibility = View.GONE
+        offlineView.visibility = View.VISIBLE
+        offlineView.bringToFront()
     }
 
     private fun askNotificationPermission() {
@@ -213,9 +344,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             networkMonitor.isOnline.collectLatest { isOnline ->
                 if (!isOnline) {
-                    wasOffline = true
-                    pageLoader.visibility = View.GONE
-                    offlineView.visibility = View.VISIBLE
+                    showOfflineScreen()
                 } else {
                     if (wasOffline || offlineView.visibility == View.VISIBLE) {
                         wasOffline = false
@@ -229,12 +358,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reloadWebView() {
-        val currentWvUrl = webView.url
-        if (currentWvUrl.isNullOrEmpty() || currentWvUrl == "about:blank" || currentWvUrl.startsWith("data:")) {
-            webView.loadUrl(lastUrl)
+        val target = if (lastUrl.isNotEmpty() && lastUrl != "about:blank" && !lastUrl.startsWith("data:")) {
+            lastUrl
         } else {
-            webView.reload()
+            "https://www.aakasi.com/"
         }
+        webView.loadUrl(target)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -245,31 +374,46 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Routing rule:
-     *  - "ref=app" present -> generated by OUR app's share/copy feature ->
-     *    load it straight into the in-app WebView.
-     *  - Not present -> generated by the WEBSITE's share/copy feature (or
-     *    any other plain aakasi.com link) -> hand off to the real browser
-     *    using an EXPLICIT package name. This is the key fix: an explicit
-     *    package bypasses Android's App Links resolution completely, so
-     *    it can never be routed back to this app again. That implicit-
-     *    intent re-resolution was the cause of the previous loop.
+     *  - "ref=app" present or payment/checkout redirect or active in-app session ->
+     *    load straight into the in-app WebView.
+     *  - Plain external link opened when app is not active -> hand off to browser.
      */
     private fun handleIncomingIntent(intent: Intent) {
         val data: Uri? = intent.data
 
         if (data != null) {
             val referrerTag = data.getQueryParameter("ref")
+            val path = data.path?.lowercase() ?: ""
+            val query = data.query?.lowercase() ?: ""
 
-            if (referrerTag == "app") {
+            val isPaymentOrOrder = path.contains("order") ||
+                    path.contains("checkout") ||
+                    path.contains("payment") ||
+                    path.contains("cart") ||
+                    path.contains("success") ||
+                    query.contains("payment") ||
+                    query.contains("razorpay") ||
+                    query.contains("status") ||
+                    query.contains("order")
+
+            if (referrerTag == "app" || isPaymentOrOrder || webView.url != null) {
                 val targetUrl = data.toString()
                 lastUrl = targetUrl
-                webView.loadUrl(targetUrl)
+                if (networkMonitor.isCurrentlyConnected()) {
+                    webView.loadUrl(targetUrl)
+                } else {
+                    showOfflineScreen()
+                }
             } else {
                 openInExternalBrowser(data)
                 finish()
             }
         } else if (webView.url == null) {
-            webView.loadUrl(lastUrl)
+            if (networkMonitor.isCurrentlyConnected()) {
+                webView.loadUrl(lastUrl)
+            } else {
+                showOfflineScreen()
+            }
         }
     }
 
