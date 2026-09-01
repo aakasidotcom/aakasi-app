@@ -204,7 +204,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView?, url: String?) {
                 super.onPageCommitVisible(view, url)
-                if (currentProgress >= 9) {
+                if (currentProgress >= 50) {
                     pageLoader.visibility = View.GONE
                 }
             }
@@ -242,9 +242,9 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
                 currentProgress = newProgress
-                if (newProgress >= 9) {
+                if (newProgress >= 50) {
                     pageLoader.visibility = View.GONE
-                } else if (newProgress < 9 && networkMonitor.isCurrentlyConnected() && splashView.visibility != View.VISIBLE && offlineView.visibility != View.VISIBLE) {
+                } else if (newProgress < 50 && networkMonitor.isCurrentlyConnected() && splashView.visibility != View.VISIBLE && offlineView.visibility != View.VISIBLE) {
                     pageLoader.visibility = View.VISIBLE
                 }
             }
@@ -330,7 +330,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             delay(3000)
             splashView.visibility = View.GONE
-            if (networkMonitor.isCurrentlyConnected() && currentProgress < 9 && webView.visibility == View.VISIBLE) {
+            if (networkMonitor.isCurrentlyConnected() && currentProgress < 50 && webView.visibility == View.VISIBLE) {
                 pageLoader.visibility = View.VISIBLE
             }
         }
