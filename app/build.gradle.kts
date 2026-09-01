@@ -17,8 +17,8 @@ android {
     applicationId = "aakasi.com"
     minSdk = 23
     targetSdk = 35
-    versionCode = 4
-    versionName = "4.0"
+    versionCode = 5
+    versionName = "3.50.14"
 
     vectorDrawables {
       useSupportLibrary = true

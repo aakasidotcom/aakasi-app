@@ -18,7 +18,7 @@
         android:visibility="gone"
         android:contentDescription="Loading..." />
 
-    <!-- No Internet Connection Overlay -->
+    <!-- Offline View (tap to retry) -->
     <LinearLayout
         android:id="@+id/offline_view"
         android:layout_width="match_parent"

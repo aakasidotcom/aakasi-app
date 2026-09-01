@@ -30,13 +30,13 @@ class AakasiApp : Application() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channelId = "aakasi_notifications"
-            val channelName = "Aakasi News & Updates"
+            val channelName = "Miscellaneous"
             val channel = NotificationChannel(
                 channelId,
                 channelName,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifications for latest posts, news and updates from Aakasi"
+                description = "Notifications and updates from Aakasi"
                 enableVibration(true)
                 setShowBadge(true)
             }

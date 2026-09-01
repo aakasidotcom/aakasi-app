@@ -32,6 +32,10 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private var splashShown = false
+    }
+
     private lateinit var webView: WebView
     private lateinit var pageLoader: ImageView
     private lateinit var offlineView: View
@@ -40,7 +44,7 @@ class MainActivity : AppCompatActivity() {
 
     private var wasOffline = false
     private var lastUrl: String = "https://www.aakasi.com/"
-    private var splashShown = false
+    private var currentProgress: Int = 0
 
     // Register Notification Permission Launcher for Android 13+ (API 33+)
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -50,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_MyApplication)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -63,7 +68,7 @@ class MainActivity : AppCompatActivity() {
         // Setup animated GIF loader
         setupPageLoader()
 
-        // Splash screen with 3 seconds delay (only on fresh launch)
+        // Splash screen with 3 seconds delay (only on fresh cold launch)
         if (savedInstanceState == null && !splashShown) {
             setupSplashScreen()
         } else {
@@ -90,6 +95,7 @@ class MainActivity : AppCompatActivity() {
             javaScriptCanOpenWindowsAutomatically = true
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
 
             // Clean User Agent:
             // Razorpay Checkout JS checks for '; wv' and 'Version/X.X' in navigator.userAgent.
@@ -111,10 +117,7 @@ class MainActivity : AppCompatActivity() {
 
         // Make offline view clickable so user can tap anywhere on it to retry
         offlineView.setOnClickListener {
-            if (networkMonitor.isCurrentlyConnected()) {
-                offlineView.visibility = View.GONE
-                reloadWebView()
-            }
+            reloadWebView()
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -187,30 +190,28 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                currentProgress = 0
                 url?.let {
                     if (it != "about:blank" && !it.startsWith("data:")) {
                         lastUrl = it
                     }
                 }
-                if (networkMonitor.isCurrentlyConnected()) {
-                    offlineView.visibility = View.GONE
-                    if (splashView.visibility != View.VISIBLE) {
-                        pageLoader.visibility = View.VISIBLE
-                    }
-                } else {
-                    pageLoader.visibility = View.GONE
-                    offlineView.visibility = View.VISIBLE
-                    wasOffline = true
+                hideOfflineScreen()
+                if (splashView.visibility != View.VISIBLE) {
+                    pageLoader.visibility = View.VISIBLE
                 }
             }
 
             override fun onPageCommitVisible(view: WebView?, url: String?) {
                 super.onPageCommitVisible(view, url)
-                pageLoader.visibility = View.GONE
+                if (currentProgress >= 9) {
+                    pageLoader.visibility = View.GONE
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                currentProgress = 100
                 pageLoader.visibility = View.GONE
             }
 
@@ -221,7 +222,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
-                    showOfflineScreen()
+                    showOfflineScreen(view)
                 }
             }
 
@@ -233,15 +234,18 @@ class MainActivity : AppCompatActivity() {
                 failingUrl: String?
             ) {
                 super.onReceivedError(view, errorCode, description, failingUrl)
-                showOfflineScreen()
+                showOfflineScreen(view)
             }
         }
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
-                if (newProgress >= 1) {
+                currentProgress = newProgress
+                if (newProgress >= 9) {
                     pageLoader.visibility = View.GONE
+                } else if (newProgress < 9 && networkMonitor.isCurrentlyConnected() && splashView.visibility != View.VISIBLE && offlineView.visibility != View.VISIBLE) {
+                    pageLoader.visibility = View.VISIBLE
                 }
             }
         }
@@ -251,8 +255,7 @@ class MainActivity : AppCompatActivity() {
         // Handle Back button to navigate back in WebView history
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (offlineView.visibility == View.VISIBLE && networkMonitor.isCurrentlyConnected()) {
-                    offlineView.visibility = View.GONE
+                if (offlineView.visibility == View.VISIBLE) {
                     reloadWebView()
                     return
                 }
@@ -270,7 +273,7 @@ class MainActivity : AppCompatActivity() {
 
         // Check initial connectivity immediately
         if (!networkMonitor.isCurrentlyConnected()) {
-            showOfflineScreen()
+            showOfflineScreen(webView)
         }
 
         handleIncomingIntent(intent)
@@ -293,11 +296,19 @@ class MainActivity : AppCompatActivity() {
         webView.destroy()
     }
 
-    private fun showOfflineScreen() {
+    private fun showOfflineScreen(view: WebView? = null) {
         wasOffline = true
         pageLoader.visibility = View.GONE
+        try {
+            (view ?: webView).stopLoading()
+        } catch (_: Exception) {}
         offlineView.visibility = View.VISIBLE
         offlineView.bringToFront()
+    }
+
+    private fun hideOfflineScreen() {
+        wasOffline = false
+        offlineView.visibility = View.GONE
     }
 
     private fun askNotificationPermission() {
@@ -315,9 +326,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupSplashScreen() {
         splashShown = true
         splashView.visibility = View.VISIBLE
+        splashView.bringToFront()
         lifecycleScope.launch {
             delay(3000)
             splashView.visibility = View.GONE
+            if (networkMonitor.isCurrentlyConnected() && currentProgress < 9 && webView.visibility == View.VISIBLE) {
+                pageLoader.visibility = View.VISIBLE
+            }
         }
     }
 
@@ -344,12 +359,9 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             networkMonitor.isOnline.collectLatest { isOnline ->
                 if (!isOnline) {
-                    showOfflineScreen()
+                    showOfflineScreen(webView)
                 } else {
                     if (wasOffline || offlineView.visibility == View.VISIBLE) {
-                        wasOffline = false
-                        offlineView.visibility = View.GONE
-                        // Auto reload feature when connection returns
                         reloadWebView()
                     }
                 }
@@ -358,6 +370,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reloadWebView() {
+        hideOfflineScreen()
+        pageLoader.visibility = View.VISIBLE
         val target = if (lastUrl.isNotEmpty() && lastUrl != "about:blank" && !lastUrl.startsWith("data:")) {
             lastUrl
         } else {
@@ -396,23 +410,25 @@ class MainActivity : AppCompatActivity() {
                     query.contains("status") ||
                     query.contains("order")
 
-            if (referrerTag == "app" || isPaymentOrOrder || webView.url != null) {
+            if (referrerTag == "app" || isPaymentOrOrder || (webView.url != null && webView.url != "about:blank")) {
                 val targetUrl = data.toString()
                 lastUrl = targetUrl
                 if (networkMonitor.isCurrentlyConnected()) {
+                    hideOfflineScreen()
                     webView.loadUrl(targetUrl)
                 } else {
-                    showOfflineScreen()
+                    showOfflineScreen(webView)
                 }
             } else {
                 openInExternalBrowser(data)
                 finish()
             }
-        } else if (webView.url == null) {
+        } else if (webView.url == null || webView.url == "about:blank") {
             if (networkMonitor.isCurrentlyConnected()) {
+                hideOfflineScreen()
                 webView.loadUrl(lastUrl)
             } else {
-                showOfflineScreen()
+                showOfflineScreen(webView)
             }
         }
     }

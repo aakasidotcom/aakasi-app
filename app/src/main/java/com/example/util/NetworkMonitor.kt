@@ -39,7 +39,7 @@ class NetworkMonitor(context: Context) {
             }
 
             override fun onLost(network: Network) {
-                trySend(isCurrentlyConnected())
+                trySend(false)
             }
 
             override fun onUnavailable() {

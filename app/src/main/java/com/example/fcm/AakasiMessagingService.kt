@@ -86,11 +86,11 @@ class AakasiMessagingService : FirebaseMessagingService() {
 
     private fun showNotification(title: String, body: String, targetUrl: String, isOrderNotification: Boolean = false) {
         val channelId = if (isOrderNotification) "aakasi_orders" else "aakasi_notifications"
-        val channelName = if (isOrderNotification) "WooCommerce Order Alerts" else "Aakasi News & Updates"
+        val channelName = if (isOrderNotification) "WooCommerce Order Alerts" else "Miscellaneous"
         val channelDescription = if (isOrderNotification) {
             "Real-time notifications for new orders, status changes, and customer purchases"
         } else {
-            "Notifications for latest posts, news and updates from Aakasi"
+            "Notifications and updates from Aakasi"
         }
 
         val notificationManager =
