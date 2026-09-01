@@ -11,13 +11,13 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk = 35
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "aakasi.com"
     minSdk = 23
-    targetSdk = 35
-    versionCode = 5
+    targetSdk = 36
+    versionCode = 6
     versionName = "3.50.14"
 
     vectorDrawables {
@@ -56,6 +56,9 @@ android {
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
+      ndk {
+        debugSymbolLevel = "FULL"
+      }
     }
     debug {
       // Uses default Android Gradle Plugin debug signing automatically

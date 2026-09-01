@@ -20,6 +20,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
 import coil.decode.GifDecoder
@@ -33,7 +34,7 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private var splashShown = false
+        private var splashDismissed = false
     }
 
     private lateinit var webView: WebView
@@ -54,7 +55,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        setTheme(R.style.Theme_MyApplication)
+        val splashScreen = installSplashScreen()
+        // Instantly remove system splash icon so only the exact custom splash layout is displayed
+        splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
+            splashScreenViewProvider.remove()
+        }
+        splashScreen.setKeepOnScreenCondition { false }
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -68,9 +75,24 @@ class MainActivity : AppCompatActivity() {
         // Setup animated GIF loader
         setupPageLoader()
 
-        // Splash screen with 3 seconds delay (only on fresh cold launch)
-        if (savedInstanceState == null && !splashShown) {
-            setupSplashScreen()
+        // Display exact uploaded splash screen on cold launch
+        if (savedInstanceState == null && !splashDismissed) {
+            splashView.visibility = View.VISIBLE
+            splashView.bringToFront()
+            lifecycleScope.launch {
+                delay(3000)
+                splashDismissed = true
+                splashView.animate()
+                    .alpha(0f)
+                    .setDuration(250)
+                    .withEndAction {
+                        splashView.visibility = View.GONE
+                        if (networkMonitor.isCurrentlyConnected() && currentProgress < 100 && webView.visibility == View.VISIBLE) {
+                            pageLoader.visibility = View.VISIBLE
+                        }
+                    }
+                    .start()
+            }
         } else {
             splashView.visibility = View.GONE
         }
@@ -319,19 +341,6 @@ class MainActivity : AppCompatActivity() {
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
-    private fun setupSplashScreen() {
-        splashShown = true
-        splashView.visibility = View.VISIBLE
-        splashView.bringToFront()
-        lifecycleScope.launch {
-            delay(3000)
-            splashView.visibility = View.GONE
-            if (networkMonitor.isCurrentlyConnected() && currentProgress < 100 && webView.visibility == View.VISIBLE) {
-                pageLoader.visibility = View.VISIBLE
             }
         }
     }

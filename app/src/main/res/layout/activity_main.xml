@@ -55,19 +55,21 @@
             android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- Splash Screen Overlay (3 seconds delay) -->
+    <!-- Custom Uploaded Splash Screen (Exact Image, uncropped & unstretched) -->
     <FrameLayout
         android:id="@+id/splash_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/white"
-        android:visibility="visible">
+        android:visibility="gone">
 
         <ImageView
+            android:id="@+id/splash_image"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:src="@drawable/aakasi_app_splash_screen"
             android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
             android:contentDescription="Splash Screen" />
     </FrameLayout>
 
