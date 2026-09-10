@@ -85,18 +85,18 @@ class AakasiMessagingService : FirebaseMessagingService() {
     }
 
     private fun showNotification(title: String, body: String, targetUrl: String, isOrderNotification: Boolean = false) {
-        val channelId = if (isOrderNotification) "aakasi_orders" else "aakasi_notifications"
-        val channelName = if (isOrderNotification) "WooCommerce Order Alerts" else "Miscellaneous"
-        val channelDescription = if (isOrderNotification) {
-            "Real-time notifications for new orders, status changes, and customer purchases"
-        } else {
-            "Notifications and updates from Aakasi"
-        }
+        val channelId = "aakasi_notifications"
+        val channelName = "Miscellaneous"
+        val channelDescription = "Miscellaneous"
 
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                notificationManager.deleteNotificationChannel("aakasi_orders")
+            } catch (_: Exception) {}
+
             val channel = NotificationChannel(
                 channelId,
                 channelName,

@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -8,8 +9,11 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -20,6 +24,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import coil.ImageLoader
@@ -30,6 +35,7 @@ import com.example.util.NetworkMonitor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -47,11 +53,85 @@ class MainActivity : AppCompatActivity() {
     private var lastUrl: String = "https://www.aakasi.com/"
     private var currentProgress: Int = 0
 
+    // File Chooser state for photo, video, and camera uploads
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var cameraPhotoUri: Uri? = null
+    private var pendingWebPermissionRequest: PermissionRequest? = null
+
     // Register Notification Permission Launcher for Android 13+ (API 33+)
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         // Permission result handled
+    }
+
+    // Register Launcher for File Chooser (Photos, Videos, and Camera Capture)
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uriResult: Array<Uri>? = if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            if (data != null) {
+                val clipData = data.clipData
+                if (clipData != null && clipData.itemCount > 0) {
+                    Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
+                } else if (data.data != null) {
+                    arrayOf(data.data!!)
+                } else if (cameraPhotoUri != null) {
+                    arrayOf(cameraPhotoUri!!)
+                } else {
+                    null
+                }
+            } else if (cameraPhotoUri != null) {
+                arrayOf(cameraPhotoUri!!)
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+        filePathCallback?.onReceiveValue(uriResult)
+        filePathCallback = null
+    }
+
+    // Register Launcher for HTML5 WebRTC / Camera & Microphone web permission requests
+    private val webMediaPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val request = pendingWebPermissionRequest
+        pendingWebPermissionRequest = null
+        if (request != null) {
+            val grantedResources = mutableListOf<String>()
+            for (resource in request.resources) {
+                when (resource) {
+                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> {
+                        if (permissions[Manifest.permission.CAMERA] == true ||
+                            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            grantedResources.add(resource)
+                        }
+                    }
+                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> {
+                        if (permissions[Manifest.permission.RECORD_AUDIO] == true ||
+                            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            grantedResources.add(resource)
+                        }
+                    }
+                    else -> grantedResources.add(resource)
+                }
+            }
+            if (grantedResources.isNotEmpty()) {
+                request.grant(grantedResources.toTypedArray())
+            } else {
+                request.deny()
+            }
+        }
+    }
+
+    // Register Launcher for Camera, Microphone, Photos and Videos runtime permissions
+    private val appMediaPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        // Media permissions updated
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,6 +149,12 @@ class MainActivity : AppCompatActivity() {
         pageLoader = findViewById(R.id.page_loader)
         offlineView = findViewById(R.id.offline_view)
         splashView = findViewById(R.id.splash_view)
+
+        // Remove entire WebView scrollbars
+        webView.isVerticalScrollBarEnabled = false
+        webView.isHorizontalScrollBarEnabled = false
+        webView.scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
+        webView.overScrollMode = View.OVER_SCROLL_NEVER
 
         networkMonitor = NetworkMonitor(this)
 
@@ -99,6 +185,9 @@ class MainActivity : AppCompatActivity() {
 
         // Ask for Notification Permission on initial launch
         askNotificationPermission()
+
+        // Ask for Camera, Microphone, Photos and Videos access
+        requestMediaPermissions()
 
         // Configure WebView settings
         webView.settings.apply {
@@ -156,60 +245,6 @@ class MainActivity : AppCompatActivity() {
                 return handleUrlLoading(view, url)
             }
 
-            private fun handleUrlLoading(view: WebView, url: String): Boolean {
-                // Direct UPI and payment app schemes (GPay, PhonePe, Paytm, BHIM, CRED, Tez, etc.)
-                val upiSchemes = listOf("upi://", "tez://", "phonepe://", "paytmmp://", "credpay://", "bhim://", "gpay://", "mobikwik://", "freecharge://", "payzapp://")
-                if (upiSchemes.any { url.startsWith(it, ignoreCase = true) }) {
-                    return try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        true
-                    } catch (e: Exception) {
-                        true
-                    }
-                }
-
-                // Razorpay and custom app intent URLs
-                if (url.startsWith("intent://", ignoreCase = true)) {
-                    return try {
-                        val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
-                        if (intent.resolveActivity(packageManager) != null) {
-                            startActivity(intent)
-                        } else {
-                            val fallbackUrl = intent.getStringExtra("browser_fallback_url")
-                            if (!fallbackUrl.isNullOrEmpty()) {
-                                view.loadUrl(fallbackUrl)
-                            }
-                        }
-                        true
-                    } catch (e: Exception) {
-                        true
-                    }
-                }
-
-                if (url.startsWith("market://", ignoreCase = true)) {
-                    return try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        true
-                    } catch (e: Exception) {
-                        true
-                    }
-                }
-
-                val externalHosts = listOf("wa.me", "t.me", "twitter.com", "x.com", "facebook.com")
-                val isExternalApp = externalHosts.any { url.contains(it) }
-
-                return if (isExternalApp) {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    } catch (e: Exception) {
-                        view.loadUrl(url)
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
-
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 currentProgress = 0
@@ -226,6 +261,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView?, url: String?) {
                 super.onPageCommitVisible(view, url)
+                hideWebScrollbars(view)
                 if (currentProgress >= 100) {
                     pageLoader.visibility = View.GONE
                 }
@@ -233,6 +269,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                hideWebScrollbars(view)
                 currentProgress = 100
                 pageLoader.visibility = View.GONE
             }
@@ -268,6 +305,93 @@ class MainActivity : AppCompatActivity() {
                     pageLoader.visibility = View.GONE
                 } else if (newProgress < 100 && networkMonitor.isCurrentlyConnected() && splashView.visibility != View.VISIBLE && offlineView.visibility != View.VISIBLE) {
                     pageLoader.visibility = View.VISIBLE
+                }
+            }
+
+            // HTML5 Camera & Microphone permission requests (WebRTC / getUserMedia)
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                runOnUiThread {
+                    val requestedResources = request.resources
+                    val neededPermissions = mutableListOf<String>()
+
+                    if (requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
+                        if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                            neededPermissions.add(Manifest.permission.CAMERA)
+                        }
+                    }
+                    if (requestedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) {
+                        if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                            neededPermissions.add(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+
+                    if (neededPermissions.isEmpty()) {
+                        request.grant(requestedResources)
+                    } else {
+                        pendingWebPermissionRequest = request
+                        webMediaPermissionLauncher.launch(neededPermissions.toTypedArray())
+                    }
+                }
+            }
+
+            // File Chooser for Photos, Videos, and Camera Capture
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+
+                val intentList = mutableListOf<Intent>()
+
+                // Camera photo capture
+                try {
+                    val photoFile = File.createTempFile("IMG_${System.currentTimeMillis()}_", ".jpg", cacheDir)
+                    cameraPhotoUri = FileProvider.getUriForFile(
+                        this@MainActivity,
+                        "${applicationContext.packageName}.fileprovider",
+                        photoFile
+                    )
+                    val takePhotoIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                        putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
+                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    }
+                    intentList.add(takePhotoIntent)
+                } catch (_: Exception) {}
+
+                // Camera video capture
+                try {
+                    val takeVideoIntent = Intent(MediaStore.ACTION_VIDEO_CAPTURE)
+                    intentList.add(takeVideoIntent)
+                } catch (_: Exception) {}
+
+                // Photo and Video gallery chooser
+                val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                    if (fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    }
+                }
+
+                val chooserIntent = Intent(Intent.ACTION_CHOOSER).apply {
+                    putExtra(Intent.EXTRA_INTENT, contentIntent)
+                    putExtra(Intent.EXTRA_TITLE, "Select Photo or Video")
+                    if (intentList.isNotEmpty()) {
+                        putExtra(Intent.EXTRA_INITIAL_INTENTS, intentList.toTypedArray())
+                    }
+                }
+
+                return try {
+                    fileChooserLauncher.launch(chooserIntent)
+                    true
+                } catch (e: Exception) {
+                    this@MainActivity.filePathCallback?.onReceiveValue(null)
+                    this@MainActivity.filePathCallback = null
+                    false
                 }
             }
         }
@@ -331,6 +455,203 @@ class MainActivity : AppCompatActivity() {
     private fun hideOfflineScreen() {
         wasOffline = false
         offlineView.visibility = View.GONE
+    }
+
+    private fun handleUrlLoading(view: WebView, url: String): Boolean {
+        // Direct UPI and payment app schemes (GPay, PhonePe, Paytm, BHIM, CRED, Tez, etc.)
+        val upiSchemes = listOf("upi://", "tez://", "phonepe://", "paytmmp://", "credpay://", "bhim://", "gpay://", "mobikwik://", "freecharge://", "payzapp://")
+        if (upiSchemes.any { url.startsWith(it, ignoreCase = true) }) {
+            return try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                true
+            } catch (e: Exception) {
+                true
+            }
+        }
+
+        // Razorpay and custom app intent URLs
+        if (url.startsWith("intent://", ignoreCase = true)) {
+            return try {
+                val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                } else {
+                    val fallbackUrl = intent.getStringExtra("browser_fallback_url")
+                    if (!fallbackUrl.isNullOrEmpty()) {
+                        handleUrlLoading(view, fallbackUrl)
+                    }
+                }
+                true
+            } catch (e: Exception) {
+                true
+            }
+        }
+
+        if (url.startsWith("market://", ignoreCase = true)) {
+            return try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                true
+            } catch (e: Exception) {
+                true
+            }
+        }
+
+        if (url.startsWith("tel:", ignoreCase = true)) {
+            return try {
+                startActivity(Intent(Intent.ACTION_DIAL, Uri.parse(url)))
+                true
+            } catch (e: Exception) {
+                true
+            }
+        }
+
+        if (url.startsWith("mailto:", ignoreCase = true) || url.startsWith("sms:", ignoreCase = true)) {
+            return try {
+                startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse(url)))
+                true
+            } catch (e: Exception) {
+                true
+            }
+        }
+
+        // Keep javascript/data/about:blank schemes in WebView
+        if (url.startsWith("javascript:", ignoreCase = true) ||
+            url.startsWith("data:", ignoreCase = true) ||
+            url == "about:blank") {
+            return false
+        }
+
+        val uri = try { Uri.parse(url) } catch (_: Exception) { null }
+        val host = uri?.host?.lowercase() ?: ""
+
+        // Strictly keep ONLY https://www.aakasi.com (and aakasi subdomains) inside the app
+        val isAakasiHost = host == "www.aakasi.com" || host == "aakasi.com" || host.endsWith(".aakasi.com")
+        if (isAakasiHost) {
+            return false
+        }
+
+        // Payment gateway & 3DS authorization URLs during checkout stay in WebView so checkout succeeds
+        val isPaymentGateway = host.contains("razorpay") ||
+                host.contains("cashfree") ||
+                host.contains("payu") ||
+                host.contains("billdesk") ||
+                host.contains("juspay") ||
+                host.contains("ccavenue") ||
+                url.contains("3dsecure") ||
+                url.contains("otp") ||
+                url.contains("acs")
+        if (isPaymentGateway) {
+            return false
+        }
+
+        // All social media links and all remaining external links open in respective apps
+        return openInRespectiveApp(url)
+    }
+
+    private fun openInRespectiveApp(url: String): Boolean {
+        val uri = try { Uri.parse(url) } catch (_: Exception) { return false }
+        val host = uri.host?.lowercase() ?: ""
+
+        val socialAppPackages = mapOf(
+            "instagram.com" to "com.instagram.android",
+            "instagr.am" to "com.instagram.android",
+            "facebook.com" to "com.facebook.katana",
+            "fb.me" to "com.facebook.katana",
+            "fb.watch" to "com.facebook.katana",
+            "fb.com" to "com.facebook.katana",
+            "youtube.com" to "com.google.android.youtube",
+            "youtu.be" to "com.google.android.youtube",
+            "twitter.com" to "com.twitter.android",
+            "x.com" to "com.twitter.android",
+            "t.co" to "com.twitter.android",
+            "wa.me" to "com.whatsapp",
+            "api.whatsapp.com" to "com.whatsapp",
+            "chat.whatsapp.com" to "com.whatsapp",
+            "whatsapp.com" to "com.whatsapp",
+            "linkedin.com" to "com.linkedin.android",
+            "lnkd.in" to "com.linkedin.android",
+            "pinterest.com" to "com.pinterest",
+            "pin.it" to "com.pinterest",
+            "t.me" to "org.telegram.messenger",
+            "telegram.me" to "org.telegram.messenger",
+            "threads.net" to "com.instagram.barcelona",
+            "reddit.com" to "com.reddit.frontpage",
+            "snapchat.com" to "com.snapchat.android"
+        )
+
+        val targetPackage = socialAppPackages.entries.firstOrNull { (domain, _) ->
+            host == domain || host.endsWith(".$domain")
+        }?.value
+
+        if (targetPackage != null) {
+            try {
+                val appIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    setPackage(targetPackage)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (appIntent.resolveActivity(packageManager) != null) {
+                    startActivity(appIntent)
+                    return true
+                }
+            } catch (_: Exception) {}
+        }
+
+        return try {
+            val generalIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(generalIntent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun hideWebScrollbars(view: WebView?) {
+        val css = "javascript:(function() { " +
+                "var s = document.createElement('style'); " +
+                "s.innerHTML = '::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; } * { -ms-overflow-style: none !important; scrollbar-width: none !important; } html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; }'; " +
+                "document.head.appendChild(s); " +
+                "})()"
+        view?.evaluateJavascript(css, null)
+    }
+
+    private fun requestMediaPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.CAMERA)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VIDEO)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VIDEO)
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            appMediaPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
+        }
     }
 
     private fun askNotificationPermission() {
@@ -405,6 +726,16 @@ class MainActivity : AppCompatActivity() {
         val data: Uri? = intent.data
 
         if (data != null) {
+            val host = data.host?.lowercase() ?: ""
+            val isAakasi = host == "www.aakasi.com" || host == "aakasi.com" || host.endsWith(".aakasi.com")
+
+            // If not an aakasi.com link, open in respective app
+            if (!isAakasi) {
+                openInRespectiveApp(data.toString())
+                finish()
+                return
+            }
+
             val referrerTag = data.getQueryParameter("ref")
             val path = data.path?.lowercase() ?: ""
             val query = data.query?.lowercase() ?: ""

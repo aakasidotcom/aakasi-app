@@ -50,32 +50,24 @@ class AakasiApp : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = getSystemService(NotificationManager::class.java) ?: return
 
-            // Channel 1: General Notifications
-            val generalChannel = NotificationChannel(
+            // Remove legacy channels so only Miscellaneous is visible in system settings
+            try {
+                notificationManager.deleteNotificationChannel("aakasi_orders")
+            } catch (_: Exception) {}
+
+            // Unified Channel: Miscellaneous
+            val miscellaneousChannel = NotificationChannel(
                 "aakasi_notifications",
                 "Miscellaneous",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifications and updates from Aakasi"
+                description = "Miscellaneous"
                 enableVibration(true)
                 setShowBadge(true)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
 
-            // Channel 2: WooCommerce Order Updates
-            val ordersChannel = NotificationChannel(
-                "aakasi_orders",
-                "WooCommerce Order Alerts",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Real-time notifications for new orders, status changes, and customer purchases"
-                enableVibration(true)
-                setShowBadge(true)
-                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
-            }
-
-            notificationManager.createNotificationChannel(generalChannel)
-            notificationManager.createNotificationChannel(ordersChannel)
+            notificationManager.createNotificationChannel(miscellaneousChannel)
         }
     }
 }
