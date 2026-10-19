@@ -6,11 +6,20 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.SoundPool
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.MediaStore
+import android.provider.Settings
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.SoundEffectConstants
 import android.view.View
+import android.view.ViewConfiguration
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
@@ -52,6 +61,10 @@ class MainActivity : AppCompatActivity() {
     private var wasOffline = false
     private var lastUrl: String = "https://www.aakasi.com/"
     private var currentProgress: Int = 0
+
+    // SoundPool for reliable device touch clicks
+    private var soundPool: SoundPool? = null
+    private var clickSoundId: Int = 0
 
     // File Chooser state for photo, video, and camera uploads
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -189,7 +202,8 @@ class MainActivity : AppCompatActivity() {
         // Ask for Camera, Microphone, Photos and Videos access
         requestMediaPermissions()
 
-        // Configure WebView settings
+        // Configure WebView settings with high on-device cache storage
+        val initialIsOnline = networkMonitor.isCurrentlyConnected()
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -206,7 +220,13 @@ class MainActivity : AppCompatActivity() {
             javaScriptCanOpenWindowsAutomatically = true
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+            // High cache configuration: LOAD_DEFAULT caches aggressively when online;
+            // LOAD_CACHE_ELSE_NETWORK loads cached content offline on user device
+            cacheMode = if (initialIsOnline) {
+                android.webkit.WebSettings.LOAD_DEFAULT
+            } else {
+                android.webkit.WebSettings.LOAD_CACHE_ELSE_NETWORK
+            }
 
             // Clean User Agent:
             // Razorpay Checkout JS checks for '; wv' and 'Version/X.X' in navigator.userAgent.
@@ -220,14 +240,33 @@ class MainActivity : AppCompatActivity() {
             userAgentString = cleanedUa
         }
 
+        // Configure ServiceWorker cache mode
+        try {
+            android.webkit.ServiceWorkerController.getInstance().serviceWorkerWebSettings.cacheMode =
+                if (initialIsOnline) {
+                    android.webkit.WebSettings.LOAD_DEFAULT
+                } else {
+                    android.webkit.WebSettings.LOAD_CACHE_ELSE_NETWORK
+                }
+        } catch (_: Exception) {}
+
         // Enable third-party cookies for payment gateway iframes & 3DS authorization
         android.webkit.CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true)
         }
 
+        // Initialize SoundPool for instant device touch click playback
+        initSoundPool()
+
+        // Disable uncoordinated View system sound effects on WebView so that only
+        // important clicks (links, buttons, form controls) trigger touch sounds via bridge
+        webView.isSoundEffectsEnabled = false
+
         // Make offline view clickable so user can tap anywhere on it to retry
+        offlineView.isSoundEffectsEnabled = false
         offlineView.setOnClickListener {
+            playDefaultTouchSound()
             reloadWebView()
         }
 
@@ -248,6 +287,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 currentProgress = 0
+                injectAppEnhancements(view)
                 url?.let {
                     if (it != "about:blank" && !it.startsWith("data:")) {
                         lastUrl = it
@@ -261,7 +301,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView?, url: String?) {
                 super.onPageCommitVisible(view, url)
-                hideWebScrollbars(view)
+                injectAppEnhancements(view)
                 if (currentProgress >= 100) {
                     pageLoader.visibility = View.GONE
                 }
@@ -269,9 +309,13 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                hideWebScrollbars(view)
+                injectAppEnhancements(view)
                 currentProgress = 100
                 pageLoader.visibility = View.GONE
+                try {
+                    android.webkit.CookieManager.getInstance().flush()
+                    android.net.http.HttpResponseCache.getInstalled()?.flush()
+                } catch (_: Exception) {}
             }
 
             override fun onReceivedError(
@@ -301,6 +345,9 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
                 currentProgress = newProgress
+                if (newProgress >= 15) {
+                    injectAppEnhancements(view)
+                }
                 if (newProgress >= 100) {
                     pageLoader.visibility = View.GONE
                 } else if (newProgress < 100 && networkMonitor.isCurrentlyConnected() && splashView.visibility != View.VISIBLE && offlineView.visibility != View.VISIBLE) {
@@ -397,6 +444,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(AndroidShareBridge(this), "AndroidShare")
+        val soundBridge = AndroidSoundBridge()
+        webView.addJavascriptInterface(soundBridge, "AndroidSound")
+        webView.addJavascriptInterface(soundBridge, "AndroidTouchSound")
 
         // Handle Back button to navigate back in WebView history
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -435,10 +485,18 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
         webView.onPause()
         webView.pauseTimers()
+        try {
+            android.webkit.CookieManager.getInstance().flush()
+            android.net.http.HttpResponseCache.getInstalled()?.flush()
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            soundPool?.release()
+            soundPool = null
+        } catch (_: Exception) {}
         webView.destroy()
     }
 
@@ -607,13 +665,206 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun initSoundPool() {
+        try {
+            if (soundPool == null) {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                soundPool = SoundPool.Builder()
+                    .setMaxStreams(1)
+                    .setAudioAttributes(audioAttributes)
+                    .build().apply {
+                        clickSoundId = load(this@MainActivity, R.raw.touch_click, 1)
+                    }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private var lastSoundTimestamp = 0L
+
+    fun playDefaultTouchSound() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastSoundTimestamp < 350L) {
+            return
+        }
+        lastSoundTimestamp = now
+
+        runOnUiThread {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            val systemSoundEffectsEnabled = try {
+                Settings.System.getInt(
+                    contentResolver,
+                    Settings.System.SOUND_EFFECTS_ENABLED,
+                    0
+                ) != 0
+            } catch (_: Exception) {
+                false
+            }
+
+            // Play exactly ONE sound source:
+            // If device default touch sounds are enabled in system settings, trigger native FX_KEY_CLICK.
+            // Otherwise, play the bundled touch click sound from SoundPool so feedback is audible.
+            if (systemSoundEffectsEnabled && audioManager != null) {
+                try {
+                    audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK)
+                } catch (_: Exception) {
+                    try {
+                        if (clickSoundId != 0 && soundPool != null) {
+                            soundPool?.play(clickSoundId, 0.7f, 0.7f, 1, 0, 1.0f)
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else {
+                try {
+                    if (clickSoundId != 0 && soundPool != null) {
+                        soundPool?.play(clickSoundId, 0.7f, 0.7f, 1, 0, 1.0f)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun injectAppEnhancements(view: WebView?) {
+        if (view == null) return
+        val js = """
+            (function() {
+                try {
+                    function applyAppCustomizations() {
+                        var styleId = 'aakasi-app-custom-style';
+                        var doc = document;
+                        if (!doc) return;
+                        var head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
+                        if (!head) return;
+
+                        var css = '::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; } ' +
+                            '* { -ms-overflow-style: none !important; scrollbar-width: none !important; } ' +
+                            'html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; } ' +
+                            '.hide-on-app, [class*="hide-on-app"], .elementor-element.hide-on-app, .elementor-widget.hide-on-app, div.hide-on-app, section.hide-on-app { ' +
+                            'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0px !important; ' +
+                            'min-height: 0px !important; max-height: 0px !important; width: 0px !important; min-width: 0px !important; ' +
+                            'max-width: 0px !important; margin: 0px !important; padding: 0px !important; border: none !important; ' +
+                            'overflow: hidden !important; pointer-events: none !important; position: absolute !important; ' +
+                            'clip: rect(0,0,0,0) !important; clip-path: inset(50%) !important; transform: scale(0) !important; }';
+
+                        var existing = doc.getElementById(styleId);
+                        if (!existing) {
+                            var style = doc.createElement('style');
+                            style.id = styleId;
+                            style.type = 'text/css';
+                            style.appendChild(doc.createTextNode(css));
+                            head.appendChild(style);
+                        } else if (existing.innerHTML !== css) {
+                            existing.innerHTML = css;
+                        }
+
+                        try {
+                            var items = doc.querySelectorAll('.hide-on-app, [class*="hide-on-app"]');
+                            for (var i = 0; i < items.length; i++) {
+                                var el = items[i];
+                                el.style.setProperty('display', 'none', 'important');
+                                el.style.setProperty('visibility', 'hidden', 'important');
+                                el.style.setProperty('height', '0px', 'important');
+                                el.style.setProperty('max-height', '0px', 'important');
+                                el.style.setProperty('overflow', 'hidden', 'important');
+                                el.setAttribute('hidden', 'true');
+                                el.hidden = true;
+                            }
+                        } catch (e) {}
+                    }
+
+                    applyAppCustomizations();
+
+                    if (!window._aakasiObserverInitialized && window.MutationObserver) {
+                        window._aakasiObserverInitialized = true;
+                        var obs = new MutationObserver(function() {
+                            applyAppCustomizations();
+                        });
+                        var root = document.documentElement || document.body;
+                        if (root) {
+                            obs.observe(root, { childList: true, subtree: true });
+                        }
+                    }
+
+                    function isImportantClickable(target) {
+                        if (!target || target === document || target === document.documentElement || target === document.body) {
+                            return false;
+                        }
+
+                        // Specific interactive elements, tags, attributes, and roles
+                        var interactiveSelector = 'a[href], button, input, select, textarea, label, summary, details, ' +
+                            '[role="button"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], ' +
+                            '[role="tab"], [role="checkbox"], [role="radio"], [role="switch"], [role="option"], [role="combobox"], ' +
+                            '[tabindex]:not([tabindex="-1"]), [onclick], [data-action], [data-toggle], [data-bs-toggle], ' +
+                            '.btn, [class*="btn-"], [class*="button"], [class*="nav-link"], [class*="menu-item"], ' +
+                            '.woocommerce-loop-product__link, .add_to_cart_button, .cart, .checkout-button, ' +
+                            '.elementor-button, .elementor-item, .nav-item, .clickable';
+
+                        try {
+                            if (target.closest && target.closest(interactiveSelector)) {
+                                return true;
+                            }
+                        } catch (_) {}
+
+                        // Inspect target and up to 4 ancestors for pointer cursor or onclick
+                        var curr = target;
+                        var depth = 0;
+                        while (curr && curr !== document.body && curr !== document.documentElement && depth < 5) {
+                            if (curr.onclick || curr.getAttribute('onclick')) {
+                                return true;
+                            }
+                            var role = curr.getAttribute('role');
+                            if (role === 'button' || role === 'link' || role === 'menuitem' || role === 'tab' || role === 'switch') {
+                                return true;
+                            }
+                            try {
+                                var compStyle = window.getComputedStyle(curr);
+                                if (compStyle && compStyle.cursor === 'pointer') {
+                                    return true;
+                                }
+                            } catch (_) {}
+                            curr = curr.parentElement;
+                            depth++;
+                        }
+                        return false;
+                    }
+
+                    if (!window._aakasiTouchSoundAttached) {
+                        window._aakasiTouchSoundAttached = true;
+                        var lastClickTime = 0;
+                        document.addEventListener('click', function(e) {
+                            if (!e || !e.target) return;
+                            if (!isImportantClickable(e.target)) {
+                                return;
+                            }
+                            var now = Date.now();
+                            if (now - lastClickTime > 350) {
+                                lastClickTime = now;
+                                try {
+                                    if (window.AndroidSound && typeof window.AndroidSound.playClickSound === 'function') {
+                                        window.AndroidSound.playClickSound();
+                                    } else if (window.AndroidTouchSound && typeof window.AndroidTouchSound.playClickSound === 'function') {
+                                        window.AndroidTouchSound.playClickSound();
+                                    }
+                                } catch (err) {}
+                            }
+                        }, true);
+                    }
+                } catch (e) {}
+            })();
+        """.trimIndent()
+
+        view.evaluateJavascript(js, null)
+        view.post {
+            try {
+                view.loadUrl("javascript:$js")
+            } catch (_: Exception) {}
+        }
+    }
+
     private fun hideWebScrollbars(view: WebView?) {
-        val css = "javascript:(function() { " +
-                "var s = document.createElement('style'); " +
-                "s.innerHTML = '::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; } * { -ms-overflow-style: none !important; scrollbar-width: none !important; } html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; }'; " +
-                "document.head.appendChild(s); " +
-                "})()"
-        view?.evaluateJavascript(css, null)
+        injectAppEnhancements(view)
     }
 
     private fun requestMediaPermissions() {
@@ -688,8 +939,23 @@ class MainActivity : AppCompatActivity() {
     private fun setupNetworkMonitoring() {
         lifecycleScope.launch {
             networkMonitor.isOnline.collectLatest { isOnline ->
+                // Adjust cache mode dynamically:
+                // When online: LOAD_DEFAULT caches responses while validating freshness
+                // When offline: LOAD_CACHE_ELSE_NETWORK serves stored content directly from on-device cache
+                webView.settings.cacheMode = if (isOnline) {
+                    android.webkit.WebSettings.LOAD_DEFAULT
+                } else {
+                    android.webkit.WebSettings.LOAD_CACHE_ELSE_NETWORK
+                }
+                try {
+                    android.webkit.ServiceWorkerController.getInstance().serviceWorkerWebSettings.cacheMode =
+                        webView.settings.cacheMode
+                } catch (_: Exception) {}
+
                 if (!isOnline) {
-                    showOfflineScreen(webView)
+                    if (webView.url.isNullOrEmpty() || webView.url == "about:blank") {
+                        showOfflineScreen(webView)
+                    }
                 } else {
                     if (wasOffline || offlineView.visibility == View.VISIBLE) {
                         reloadWebView()
@@ -816,6 +1082,18 @@ class MainActivity : AppCompatActivity() {
         return if (candidate != null && candidate != packageName) candidate else null
     }
 
+    inner class AndroidSoundBridge {
+        @JavascriptInterface
+        fun playClickSound() {
+            playDefaultTouchSound()
+        }
+
+        @JavascriptInterface
+        fun playTouchSound() {
+            playDefaultTouchSound()
+        }
+    }
+
     inner class AndroidShareBridge(private val activity: AppCompatActivity) {
         @JavascriptInterface
         fun share(text: String, url: String) {
@@ -832,6 +1110,16 @@ class MainActivity : AppCompatActivity() {
                 as android.content.ClipboardManager
             val clip = android.content.ClipData.newPlainText("AAKASI link", "$text\n$url")
             clipboard.setPrimaryClip(clip)
+        }
+
+        @JavascriptInterface
+        fun playClickSound() {
+            playDefaultTouchSound()
+        }
+
+        @JavascriptInterface
+        fun playTouchSound() {
+            playDefaultTouchSound()
         }
     }
 }

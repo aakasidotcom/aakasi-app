@@ -3,16 +3,30 @@ package com.example
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.net.http.HttpResponseCache
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
+import java.io.File
 
 class AakasiApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Initialize high-capacity on-device HTTP cache (250 MB)
+        try {
+            val httpCacheDir = File(cacheDir, "http_cache")
+            val httpCacheSize = 250L * 1024L * 1024L
+            if (HttpResponseCache.getInstalled() == null) {
+                HttpResponseCache.install(httpCacheDir, httpCacheSize)
+                Log.d("AakasiApp", "High-capacity HTTP response cache (250MB) installed")
+            }
+        } catch (e: Exception) {
+            Log.w("AakasiApp", "HTTP cache initialization error: ${e.message}")
+        }
 
         // Initialize Firebase safely
         try {
