@@ -27,9 +27,11 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.util.Log
 import android.webkit.WebViewClient
 import android.widget.ImageView
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -78,7 +80,38 @@ class MainActivity : AppCompatActivity() {
         // Permission result handled
     }
 
-    // Register Launcher for File Chooser (Photos, Videos, and Camera Capture)
+    // Registers a photo picker activity launcher in single-select mode
+    private val pickVisualMediaLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        // Callback is invoked after the user selects media items or closes the photo picker
+        if (uri != null) {
+            Log.d("PhotoPicker", "Selected media URI: $uri")
+            filePathCallback?.onReceiveValue(arrayOf(uri))
+        } else {
+            Log.d("PhotoPicker", "No media selected")
+            filePathCallback?.onReceiveValue(null)
+        }
+        filePathCallback = null
+    }
+
+    // Registers a photo picker activity launcher in multi-select mode (unlimited / max supported by gallery).
+    private val pickMultipleVisualMediaLauncher = registerForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        // Callback is invoked after the user selects media items or closes the
+        // photo picker.
+        if (uris.isNotEmpty()) {
+            Log.d("PhotoPicker", "Number of items selected: ${uris.size}")
+            filePathCallback?.onReceiveValue(uris.toTypedArray())
+        } else {
+            Log.d("PhotoPicker", "No media selected")
+            filePathCallback?.onReceiveValue(null)
+        }
+        filePathCallback = null
+    }
+
+    // Register Launcher for System Document/Content Pickers and Camera Capture
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -105,6 +138,7 @@ class MainActivity : AppCompatActivity() {
         }
         filePathCallback?.onReceiveValue(uriResult)
         filePathCallback = null
+        cameraPhotoUri = null
     }
 
     // Register Launcher for HTML5 WebRTC / Camera & Microphone web permission requests
@@ -140,13 +174,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Register Launcher for Camera, Microphone, Photos and Videos runtime permissions
-    private val appMediaPermissionsLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // Media permissions updated
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         // Instantly remove system splash icon so only the exact custom splash layout is displayed
@@ -159,6 +186,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webview)
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         pageLoader = findViewById(R.id.page_loader)
         offlineView = findViewById(R.id.offline_view)
         splashView = findViewById(R.id.splash_view)
@@ -198,9 +226,6 @@ class MainActivity : AppCompatActivity() {
 
         // Ask for Notification Permission on initial launch
         askNotificationPermission()
-
-        // Ask for Camera, Microphone, Photos and Videos access
-        requestMediaPermissions()
 
         // Configure WebView settings with high on-device cache storage
         val initialIsOnline = networkMonitor.isCurrentlyConnected()
@@ -382,7 +407,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // File Chooser for Photos, Videos, and Camera Capture
+            // File Chooser utilizing Android Photo Picker and system pickers (zero storage permissions)
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -391,49 +416,159 @@ class MainActivity : AppCompatActivity() {
                 this@MainActivity.filePathCallback?.onReceiveValue(null)
                 this@MainActivity.filePathCallback = filePathCallback
 
-                val intentList = mutableListOf<Intent>()
+                val rawAcceptTypes = fileChooserParams?.acceptTypes
+                    ?.filter { it.isNotBlank() } ?: emptyList()
+                val acceptTypes = rawAcceptTypes.flatMap { it.split(",") }
+                    .map { it.trim().lowercase() }
+                    .filter { it.isNotEmpty() }
+                val isMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                val isCapture = fileChooserParams?.isCaptureEnabled == true
 
-                // Camera photo capture
-                try {
-                    val photoFile = File.createTempFile("IMG_${System.currentTimeMillis()}_", ".jpg", cacheDir)
-                    cameraPhotoUri = FileProvider.getUriForFile(
-                        this@MainActivity,
-                        "${applicationContext.packageName}.fileprovider",
-                        photoFile
-                    )
-                    val takePhotoIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                        putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
-                        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                    }
-                    intentList.add(takePhotoIntent)
-                } catch (_: Exception) {}
-
-                // Camera video capture
-                try {
-                    val takeVideoIntent = Intent(MediaStore.ACTION_VIDEO_CAPTURE)
-                    intentList.add(takeVideoIntent)
-                } catch (_: Exception) {}
-
-                // Photo and Video gallery chooser
-                val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
-                    if (fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
-                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                // Direct camera capture if requested explicitly (<input type="file" capture>)
+                if (isCapture) {
+                    try {
+                        val photoFile = File.createTempFile("IMG_${System.currentTimeMillis()}_", ".jpg", cacheDir)
+                        cameraPhotoUri = FileProvider.getUriForFile(
+                            this@MainActivity,
+                            "${applicationContext.packageName}.fileprovider",
+                            photoFile
+                        )
+                        val takePhotoIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                            putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
+                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        }
+                        fileChooserLauncher.launch(takePhotoIntent)
+                        return true
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "Direct camera capture failed, proceeding to gallery", e)
                     }
                 }
 
-                val chooserIntent = Intent(Intent.ACTION_CHOOSER).apply {
-                    putExtra(Intent.EXTRA_INTENT, contentIntent)
-                    putExtra(Intent.EXTRA_TITLE, "Select Photo or Video")
-                    if (intentList.isNotEmpty()) {
-                        putExtra(Intent.EXTRA_INITIAL_INTENTS, intentList.toTypedArray())
+                // Identify if the request accepts images and/or videos (or general file upload)
+                val hasImages = acceptTypes.isEmpty() || acceptTypes.any { type ->
+                    type == "*/*" || type == "*" || type.startsWith("image/") ||
+                    listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif", ".svg").any { ext ->
+                        type.endsWith(ext) || type.contains(ext)
+                    }
+                }
+                val hasVideos = acceptTypes.isEmpty() || acceptTypes.any { type ->
+                    type == "*/*" || type == "*" || type.startsWith("video/") ||
+                    listOf(".mp4", ".mov", ".mkv", ".avi", ".webm", ".3gp", ".m4v").any { ext ->
+                        type.endsWith(ext) || type.contains(ext)
+                    }
+                }
+                val isNonMediaOnly = acceptTypes.isNotEmpty() && !hasImages && !hasVideos
+
+                // 1. Try modern Android Photo Picker first for zero-permission gallery access
+                if (!isNonMediaOnly && ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(this@MainActivity)) {
+                    val mediaType = when {
+                        hasImages && !hasVideos -> ActivityResultContracts.PickVisualMedia.ImageOnly
+                        !hasImages && hasVideos -> ActivityResultContracts.PickVisualMedia.VideoOnly
+                        else -> ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                    }
+
+                    try {
+                        val request = PickVisualMediaRequest(mediaType)
+                        if (isMultiple) {
+                            pickMultipleVisualMediaLauncher.launch(request)
+                        } else {
+                            pickVisualMediaLauncher.launch(request)
+                        }
+                        return true
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "Photo picker launch error, falling back to device gallery", e)
                     }
                 }
 
+                // 2. Open device Gallery (Google Photos / System Gallery)
+                if (!isNonMediaOnly) {
+                    return try {
+                        val galleryIntent = Intent(Intent.ACTION_PICK).apply {
+                            if (hasVideos && !hasImages) {
+                                setDataAndType(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video/*")
+                            } else if (hasImages && !hasVideos) {
+                                setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+                            } else {
+                                setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+                                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                            }
+                            if (isMultiple) {
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                        }
+
+                        val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = if (hasVideos && !hasImages) "video/*" else "image/*"
+                            if (hasImages && hasVideos) {
+                                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                            }
+                            if (isMultiple) {
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                        }
+
+                        val chooserTitle = when {
+                            hasVideos && !hasImages -> "Select Video from Gallery"
+                            hasImages && !hasVideos -> "Select Photo from Gallery"
+                            else -> "Select from Gallery"
+                        }
+
+                        val primaryIntent = if (galleryIntent.resolveActivity(packageManager) != null) galleryIntent else getContentIntent
+                        val chooserIntent = Intent.createChooser(primaryIntent, chooserTitle)
+
+                        val extraIntents = mutableListOf<Intent>()
+                        if (primaryIntent != galleryIntent && galleryIntent.resolveActivity(packageManager) != null) {
+                            extraIntents.add(galleryIntent)
+                        }
+                        if (primaryIntent != getContentIntent && getContentIntent.resolveActivity(packageManager) != null) {
+                            extraIntents.add(getContentIntent)
+                        }
+
+                        // Add camera option so user can also snap a photo directly
+                        try {
+                            val photoFile = File.createTempFile("IMG_${System.currentTimeMillis()}_", ".jpg", cacheDir)
+                            cameraPhotoUri = FileProvider.getUriForFile(
+                                this@MainActivity,
+                                "${applicationContext.packageName}.fileprovider",
+                                photoFile
+                            )
+                            val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                                putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
+                                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            }
+                            if (cameraIntent.resolveActivity(packageManager) != null) {
+                                extraIntents.add(cameraIntent)
+                            }
+                        } catch (_: Exception) {}
+
+                        if (extraIntents.isNotEmpty()) {
+                            chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents.toTypedArray())
+                        }
+
+                        fileChooserLauncher.launch(chooserIntent)
+                        true
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Failed to launch gallery intent", e)
+                        this@MainActivity.filePathCallback?.onReceiveValue(null)
+                        this@MainActivity.filePathCallback = null
+                        false
+                    }
+                }
+
+                // 3. Fallback for explicit non-media documents (e.g. PDF)
                 return try {
-                    fileChooserLauncher.launch(chooserIntent)
+                    val systemPickerIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = if (acceptTypes.size == 1 && !acceptTypes[0].contains("*")) acceptTypes[0] else "*/*"
+                        if (acceptTypes.isNotEmpty()) {
+                            putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
+                        }
+                        if (isMultiple) {
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                        }
+                    }
+                    fileChooserLauncher.launch(systemPickerIntent)
                     true
                 } catch (e: Exception) {
                     this@MainActivity.filePathCallback?.onReceiveValue(null)
@@ -867,43 +1002,7 @@ class MainActivity : AppCompatActivity() {
         injectAppEnhancements(view)
     }
 
-    private fun requestMediaPermissions() {
-        val permissionsToRequest = mutableListOf<String>()
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.CAMERA)
-        }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-
-        if (permissionsToRequest.isNotEmpty()) {
-            appMediaPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
-        }
-    }
 
     private fun askNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

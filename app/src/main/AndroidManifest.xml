@@ -18,12 +18,7 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
-    <!-- Photos and Videos Access -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" tools:ignore="ScopedStorage" />
+    <!-- Photos, Videos, and File selection uses Android Photo Picker (PickVisualMedia) and system pickers which require ZERO storage permissions -->
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -87,6 +82,24 @@
         <package android:name="com.instagram.barcelona" />
         <package android:name="com.snapchat.android" />
         <package android:name="com.reddit.frontpage" />
+
+        <!-- Media / Gallery Pickers -->
+        <intent>
+            <action android:name="android.intent.action.PICK" />
+            <data android:mimeType="image/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.PICK" />
+            <data android:mimeType="video/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="image/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="video/*" />
+        </intent>
     </queries>
 
     <application
@@ -100,6 +113,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
         android:theme="@style/Theme.MyApplication">
         <activity
             android:name=".MainActivity"
@@ -164,6 +178,17 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="aakasi_notifications" />
+
+        <!-- Trigger Google Play services to install the backported photo picker module -->
+        <service android:name="com.google.android.gms.metadata.ModuleDependencies"
+                 android:enabled="false"
+                 android:exported="false"
+                 tools:ignore="MissingClass">
+            <intent-filter>
+                <action android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+            </intent-filter>
+            <meta-data android:name="photopicker_activity:0:required" android:value="" />
+        </service>
     </application>
 
 </manifest>

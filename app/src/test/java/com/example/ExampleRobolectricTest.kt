@@ -18,4 +18,11 @@ class ExampleRobolectricTest {
     val appName = context.getString(R.string.app_name)
     assertEquals("AAKASI", appName)
   }
+
+  @Test
+  fun `check photo picker availability`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val available = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(context)
+    org.junit.Assert.assertTrue(available)
+  }
 }

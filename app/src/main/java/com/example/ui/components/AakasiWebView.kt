@@ -17,9 +17,12 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.provider.MediaStore
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -90,6 +93,36 @@ fun AakasiWebView(
 
     // File Chooser for WebView (<input type="file">)
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    // Android Photo Picker launchers (zero storage permissions)
+    val pickVisualMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        // Callback is invoked after the user selects media items or closes the photo picker
+        if (uri != null) {
+            Log.d("PhotoPicker", "Selected media URI: $uri")
+            filePathCallback?.onReceiveValue(arrayOf(uri))
+        } else {
+            Log.d("PhotoPicker", "No media selected")
+            filePathCallback?.onReceiveValue(null)
+        }
+        filePathCallback = null
+    }
+
+    // Registers a photo picker activity launcher in multi-select mode (unlimited / max supported by gallery)
+    val pickMultipleVisualMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        // Callback is invoked after the user selects media items or closes the photo picker
+        if (uris.isNotEmpty()) {
+            Log.d("PhotoPicker", "Number of items selected: ${uris.size}")
+            filePathCallback?.onReceiveValue(uris.toTypedArray())
+        } else {
+            Log.d("PhotoPicker", "No media selected")
+            filePathCallback?.onReceiveValue(null)
+        }
+        filePathCallback = null
+    }
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -364,10 +397,115 @@ fun AakasiWebView(
                         filePathCallback?.onReceiveValue(null)
                         filePathCallback = filePathCallbackParam
 
+                        val rawAcceptTypes = fileChooserParams?.acceptTypes
+                            ?.filter { it.isNotBlank() } ?: emptyList()
+                        val acceptTypes = rawAcceptTypes.flatMap { it.split(",") }
+                            .map { it.trim().lowercase() }
+                            .filter { it.isNotEmpty() }
+                        val isMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+
+                        // Identify if the request accepts images and/or videos (or general file upload)
+                        val hasImages = acceptTypes.isEmpty() || acceptTypes.any { type ->
+                            type == "*/*" || type == "*" || type.startsWith("image/") ||
+                            listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif", ".svg").any { ext ->
+                                type.endsWith(ext) || type.contains(ext)
+                            }
+                        }
+                        val hasVideos = acceptTypes.isEmpty() || acceptTypes.any { type ->
+                            type == "*/*" || type == "*" || type.startsWith("video/") ||
+                            listOf(".mp4", ".mov", ".mkv", ".avi", ".webm", ".3gp", ".m4v").any { ext ->
+                                type.endsWith(ext) || type.contains(ext)
+                            }
+                        }
+                        val isNonMediaOnly = acceptTypes.isNotEmpty() && !hasImages && !hasVideos
+
+                        // 1. Try modern Android Photo Picker first for zero-permission gallery access
+                        if (!isNonMediaOnly && ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(ctx)) {
+                            val mediaType = when {
+                                hasImages && !hasVideos -> ActivityResultContracts.PickVisualMedia.ImageOnly
+                                !hasImages && hasVideos -> ActivityResultContracts.PickVisualMedia.VideoOnly
+                                else -> ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                            }
+                            try {
+                                val request = PickVisualMediaRequest(mediaType)
+                                if (isMultiple) {
+                                    pickMultipleVisualMediaLauncher.launch(request)
+                                } else {
+                                    pickVisualMediaLauncher.launch(request)
+                                }
+                                return true
+                            } catch (e: Exception) {
+                                Log.w("AakasiWebView", "Photo picker launch error, falling back to device gallery", e)
+                            }
+                        }
+
+                        // 2. Open device Gallery (Google Photos / System Gallery)
+                        if (!isNonMediaOnly) {
+                            return try {
+                                val galleryIntent = Intent(Intent.ACTION_PICK).apply {
+                                    if (hasVideos && !hasImages) {
+                                        setDataAndType(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "video/*")
+                                    } else if (hasImages && !hasVideos) {
+                                        setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+                                    } else {
+                                        setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+                                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                                    }
+                                    if (isMultiple) {
+                                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                    }
+                                }
+
+                                val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = if (hasVideos && !hasImages) "video/*" else "image/*"
+                                    if (hasImages && hasVideos) {
+                                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                                    }
+                                    if (isMultiple) {
+                                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                    }
+                                }
+
+                                val chooserTitle = when {
+                                    hasVideos && !hasImages -> "Select Video from Gallery"
+                                    hasImages && !hasVideos -> "Select Photo from Gallery"
+                                    else -> "Select from Gallery"
+                                }
+
+                                val pm = ctx.packageManager
+                                val primaryIntent = if (galleryIntent.resolveActivity(pm) != null) galleryIntent else getContentIntent
+                                val chooserIntent = Intent.createChooser(primaryIntent, chooserTitle)
+
+                                val extraIntents = mutableListOf<Intent>()
+                                if (primaryIntent != galleryIntent && galleryIntent.resolveActivity(pm) != null) {
+                                    extraIntents.add(galleryIntent)
+                                }
+                                if (primaryIntent != getContentIntent && getContentIntent.resolveActivity(pm) != null) {
+                                    extraIntents.add(getContentIntent)
+                                }
+                                if (extraIntents.isNotEmpty()) {
+                                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents.toTypedArray())
+                                }
+
+                                fileChooserLauncher.launch(chooserIntent)
+                                true
+                            } catch (e: Exception) {
+                                Log.e("AakasiWebView", "Failed to launch gallery intent", e)
+                                filePathCallback?.onReceiveValue(null)
+                                filePathCallback = null
+                                false
+                            }
+                        }
+
+                        // 3. Fallback for explicit non-media documents
                         return try {
                             val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
                                 type = "*/*"
                                 addCategory(Intent.CATEGORY_OPENABLE)
+                            }
+                            if (isMultiple) {
+                                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                             }
                             fileChooserLauncher.launch(intent)
                             true
