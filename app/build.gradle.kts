@@ -15,7 +15,7 @@ android {
 
   defaultConfig {
     applicationId = "aakasi.com"
-    minSdk = 23
+    minSdk = 24
     targetSdk = 36
     versionCode = 8
     versionName = "3.50.16"
