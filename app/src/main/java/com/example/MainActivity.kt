@@ -191,34 +191,24 @@ class MainActivity : AppCompatActivity() {
         offlineView = findViewById(R.id.offline_view)
         splashView = findViewById(R.id.splash_view)
 
-        // Remove entire WebView scrollbars
-        webView.isVerticalScrollBarEnabled = false
+        // Enable smooth scrolling and responsive overscroll
+        webView.isVerticalScrollBarEnabled = true
         webView.isHorizontalScrollBarEnabled = false
         webView.scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-        webView.overScrollMode = View.OVER_SCROLL_NEVER
+        webView.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
 
         networkMonitor = NetworkMonitor(this)
 
         // Setup animated GIF loader
         setupPageLoader()
 
-        // Display exact uploaded splash screen on cold launch
+        // Display exact uploaded splash screen on cold launch (dismissed quickly or upon page commit)
         if (savedInstanceState == null && !splashDismissed) {
             splashView.visibility = View.VISIBLE
             splashView.bringToFront()
             lifecycleScope.launch {
-                delay(3000)
-                splashDismissed = true
-                splashView.animate()
-                    .alpha(0f)
-                    .setDuration(250)
-                    .withEndAction {
-                        splashView.visibility = View.GONE
-                        if (networkMonitor.isCurrentlyConnected() && currentProgress < 100 && webView.visibility == View.VISIBLE) {
-                            pageLoader.visibility = View.VISIBLE
-                        }
-                    }
-                    .start()
+                delay(800)
+                dismissSplash()
             }
         } else {
             splashView.visibility = View.GONE
@@ -227,7 +217,7 @@ class MainActivity : AppCompatActivity() {
         // Ask for Notification Permission on initial launch
         askNotificationPermission()
 
-        // Configure WebView settings with high on-device cache storage
+        // Configure WebView settings with high on-device cache storage and responsive layout
         val initialIsOnline = networkMonitor.isCurrentlyConnected()
         webView.settings.apply {
             javaScriptEnabled = true
@@ -235,11 +225,11 @@ class MainActivity : AppCompatActivity() {
             databaseEnabled = true
             allowFileAccess = true
             allowContentAccess = true
-            useWideViewPort = false
-            loadWithOverviewMode = false
+            useWideViewPort = true
+            loadWithOverviewMode = true
             textZoom = 100
-            setSupportZoom(false)
-            builtInZoomControls = false
+            setSupportZoom(true)
+            builtInZoomControls = true
             displayZoomControls = false
             setSupportMultipleWindows(false)
             javaScriptCanOpenWindowsAutomatically = true
@@ -326,6 +316,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView?, url: String?) {
                 super.onPageCommitVisible(view, url)
+                dismissSplash()
                 injectAppEnhancements(view)
                 if (currentProgress >= 100) {
                     pageLoader.visibility = View.GONE
@@ -334,6 +325,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                dismissSplash()
                 injectAppEnhancements(view)
                 currentProgress = 100
                 pageLoader.visibility = View.GONE
@@ -350,7 +342,12 @@ class MainActivity : AppCompatActivity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
-                    showOfflineScreen(view)
+                    val code = error?.errorCode ?: 0
+                    if (code == WebViewClient.ERROR_HOST_LOOKUP ||
+                        code == WebViewClient.ERROR_CONNECT ||
+                        code == WebViewClient.ERROR_TIMEOUT) {
+                        showOfflineScreen(view)
+                    }
                 }
             }
 
@@ -362,7 +359,13 @@ class MainActivity : AppCompatActivity() {
                 failingUrl: String?
             ) {
                 super.onReceivedError(view, errorCode, description, failingUrl)
-                showOfflineScreen(view)
+                if (failingUrl == null || failingUrl == view?.url || failingUrl == lastUrl) {
+                    if (errorCode == WebViewClient.ERROR_HOST_LOOKUP ||
+                        errorCode == WebViewClient.ERROR_CONNECT ||
+                        errorCode == WebViewClient.ERROR_TIMEOUT) {
+                        showOfflineScreen(view)
+                    }
+                }
             }
         }
 
@@ -635,6 +638,19 @@ class MainActivity : AppCompatActivity() {
         webView.destroy()
     }
 
+    private fun dismissSplash() {
+        if (!splashDismissed) {
+            splashDismissed = true
+            splashView.animate()
+                .alpha(0f)
+                .setDuration(200)
+                .withEndAction {
+                    splashView.visibility = View.GONE
+                }
+                .start()
+        }
+    }
+
     private fun showOfflineScreen(view: WebView? = null) {
         wasOffline = true
         pageLoader.visibility = View.GONE
@@ -866,113 +882,43 @@ class MainActivity : AppCompatActivity() {
         val js = """
             (function() {
                 try {
-                    function applyAppCustomizations() {
-                        var styleId = 'aakasi-app-custom-style';
-                        var doc = document;
-                        if (!doc) return;
-                        var head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
-                        if (!head) return;
-
+                    // Inject lightweight CSS once for app styling and smooth scrolling
+                    var styleId = 'aakasi-app-custom-style';
+                    if (!document.getElementById(styleId)) {
                         var css = '::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; } ' +
                             '* { -ms-overflow-style: none !important; scrollbar-width: none !important; } ' +
-                            'html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; } ' +
+                            'html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; -webkit-overflow-scrolling: touch !important; overflow-y: auto !important; } ' +
                             '.hide-on-app, [class*="hide-on-app"], .elementor-element.hide-on-app, .elementor-widget.hide-on-app, div.hide-on-app, section.hide-on-app { ' +
                             'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0px !important; ' +
                             'min-height: 0px !important; max-height: 0px !important; width: 0px !important; min-width: 0px !important; ' +
                             'max-width: 0px !important; margin: 0px !important; padding: 0px !important; border: none !important; ' +
-                            'overflow: hidden !important; pointer-events: none !important; position: absolute !important; ' +
-                            'clip: rect(0,0,0,0) !important; clip-path: inset(50%) !important; transform: scale(0) !important; }';
-
-                        var existing = doc.getElementById(styleId);
-                        if (!existing) {
-                            var style = doc.createElement('style');
-                            style.id = styleId;
-                            style.type = 'text/css';
-                            style.appendChild(doc.createTextNode(css));
-                            head.appendChild(style);
-                        } else if (existing.innerHTML !== css) {
-                            existing.innerHTML = css;
-                        }
-
-                        try {
-                            var items = doc.querySelectorAll('.hide-on-app, [class*="hide-on-app"]');
-                            for (var i = 0; i < items.length; i++) {
-                                var el = items[i];
-                                el.style.setProperty('display', 'none', 'important');
-                                el.style.setProperty('visibility', 'hidden', 'important');
-                                el.style.setProperty('height', '0px', 'important');
-                                el.style.setProperty('max-height', '0px', 'important');
-                                el.style.setProperty('overflow', 'hidden', 'important');
-                                el.setAttribute('hidden', 'true');
-                                el.hidden = true;
-                            }
-                        } catch (e) {}
+                            'overflow: hidden !important; pointer-events: none !important; position: absolute !important; }';
+                        var style = document.createElement('style');
+                        style.id = styleId;
+                        style.type = 'text/css';
+                        style.appendChild(docText(css));
+                        (document.head || document.documentElement).appendChild(style);
                     }
 
-                    applyAppCustomizations();
-
-                    if (!window._aakasiObserverInitialized && window.MutationObserver) {
-                        window._aakasiObserverInitialized = true;
-                        var obs = new MutationObserver(function() {
-                            applyAppCustomizations();
-                        });
-                        var root = document.documentElement || document.body;
-                        if (root) {
-                            obs.observe(root, { childList: true, subtree: true });
-                        }
+                    function docText(t) {
+                        return document.createTextNode(t);
                     }
 
-                    function isImportantClickable(target) {
-                        if (!target || target === document || target === document.documentElement || target === document.body) {
-                            return false;
-                        }
-
-                        // Specific interactive elements, tags, attributes, and roles
-                        var interactiveSelector = 'a[href], button, input, select, textarea, label, summary, details, ' +
-                            '[role="button"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], ' +
-                            '[role="tab"], [role="checkbox"], [role="radio"], [role="switch"], [role="option"], [role="combobox"], ' +
-                            '[tabindex]:not([tabindex="-1"]), [onclick], [data-action], [data-toggle], [data-bs-toggle], ' +
-                            '.btn, [class*="btn-"], [class*="button"], [class*="nav-link"], [class*="menu-item"], ' +
-                            '.woocommerce-loop-product__link, .add_to_cart_button, .cart, .checkout-button, ' +
-                            '.elementor-button, .elementor-item, .nav-item, .clickable';
-
-                        try {
-                            if (target.closest && target.closest(interactiveSelector)) {
-                                return true;
-                            }
-                        } catch (_) {}
-
-                        // Inspect target and up to 4 ancestors for pointer cursor or onclick
-                        var curr = target;
-                        var depth = 0;
-                        while (curr && curr !== document.body && curr !== document.documentElement && depth < 5) {
-                            if (curr.onclick || curr.getAttribute('onclick')) {
-                                return true;
-                            }
-                            var role = curr.getAttribute('role');
-                            if (role === 'button' || role === 'link' || role === 'menuitem' || role === 'tab' || role === 'switch') {
-                                return true;
-                            }
-                            try {
-                                var compStyle = window.getComputedStyle(curr);
-                                if (compStyle && compStyle.cursor === 'pointer') {
-                                    return true;
-                                }
-                            } catch (_) {}
-                            curr = curr.parentElement;
-                            depth++;
-                        }
-                        return false;
-                    }
-
+                    // Fast touch click feedback without heavy DOM traversal or getComputedStyle
                     if (!window._aakasiTouchSoundAttached) {
                         window._aakasiTouchSoundAttached = true;
                         var lastClickTime = 0;
                         document.addEventListener('click', function(e) {
                             if (!e || !e.target) return;
-                            if (!isImportantClickable(e.target)) {
-                                return;
-                            }
+                            var t = e.target;
+                            var isClickable = false;
+                            try {
+                                if (t.closest && t.closest('a[href], button, input, select, textarea, label, [role="button"], [role="link"], .btn, [class*="btn-"], [class*="button"], .woocommerce-loop-product__link, .add_to_cart_button')) {
+                                    isClickable = true;
+                                }
+                            } catch (_) {}
+                            if (!isClickable) return;
+
                             var now = Date.now();
                             if (now - lastClickTime > 350) {
                                 lastClickTime = now;
@@ -982,7 +928,7 @@ class MainActivity : AppCompatActivity() {
                                     } else if (window.AndroidTouchSound && typeof window.AndroidTouchSound.playClickSound === 'function') {
                                         window.AndroidTouchSound.playClickSound();
                                     }
-                                } catch (err) {}
+                                } catch (_) {}
                             }
                         }, true);
                     }
@@ -991,11 +937,6 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
 
         view.evaluateJavascript(js, null)
-        view.post {
-            try {
-                view.loadUrl("javascript:$js")
-            } catch (_: Exception) {}
-        }
     }
 
     private fun hideWebScrollbars(view: WebView?) {

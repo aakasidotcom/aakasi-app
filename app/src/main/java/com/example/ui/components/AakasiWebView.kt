@@ -344,7 +344,7 @@ fun AakasiWebView(
                                     if (!document.getElementById('aakasi-smooth-scroll-style')) {
                                         var style = document.createElement('style');
                                         style.id = 'aakasi-smooth-scroll-style';
-                                        style.innerHTML = 'html, body { scroll-behavior: smooth !important; -webkit-overflow-scrolling: touch !important; }';
+                                        style.innerHTML = 'html, body { scroll-behavior: smooth !important; -webkit-overflow-scrolling: touch !important; overflow-y: auto !important; }';
                                         (document.head || document.documentElement).appendChild(style);
                                     }
                                 } catch(e) {}
