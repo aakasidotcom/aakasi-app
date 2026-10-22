@@ -71,9 +71,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSubscribedToAdminOrders = MutableStateFlow(false)
     val isSubscribedToAdminOrders: StateFlow<Boolean> = _isSubscribedToAdminOrders.asStateFlow()
 
-    private val _textZoom = MutableStateFlow(100)
-    val textZoom: StateFlow<Int> = _textZoom.asStateFlow()
-
     init {
         val dao = AppDatabase.getDatabase(application).notificationDao()
         repository = NotificationRepository(dao)
@@ -269,10 +266,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.clearAllNotifications()
         }
-    }
-
-    fun setTextZoom(zoom: Int) {
-        _textZoom.value = zoom
     }
 
     fun sendTestNotification(

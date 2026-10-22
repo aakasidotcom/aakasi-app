@@ -186,7 +186,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webview)
-        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        webView.setLayerType(View.LAYER_TYPE_NONE, null)
         pageLoader = findViewById(R.id.page_loader)
         offlineView = findViewById(R.id.offline_view)
         splashView = findViewById(R.id.splash_view)
@@ -202,12 +202,13 @@ class MainActivity : AppCompatActivity() {
         // Setup animated GIF loader
         setupPageLoader()
 
-        // Display exact uploaded splash screen on cold launch (dismissed quickly or upon page commit)
+        // Display exact uploaded splash screen on cold launch dynamically based on page load
         if (savedInstanceState == null && !splashDismissed) {
             splashView.visibility = View.VISIBLE
+            splashView.alpha = 1f
             splashView.bringToFront()
             lifecycleScope.launch {
-                delay(800)
+                delay(8000) // Fallback safety timeout if network is completely stalled
                 dismissSplash()
             }
         } else {
@@ -228,8 +229,8 @@ class MainActivity : AppCompatActivity() {
             useWideViewPort = true
             loadWithOverviewMode = true
             textZoom = 100
-            setSupportZoom(true)
-            builtInZoomControls = true
+            setSupportZoom(false)
+            builtInZoomControls = false
             displayZoomControls = false
             setSupportMultipleWindows(false)
             javaScriptCanOpenWindowsAutomatically = true
@@ -316,8 +317,8 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView?, url: String?) {
                 super.onPageCommitVisible(view, url)
-                dismissSplash()
                 injectAppEnhancements(view)
+                dismissSplash()
                 if (currentProgress >= 100) {
                     pageLoader.visibility = View.GONE
                 }
@@ -325,9 +326,9 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                dismissSplash()
                 injectAppEnhancements(view)
                 currentProgress = 100
+                dismissSplash()
                 pageLoader.visibility = View.GONE
                 try {
                     android.webkit.CookieManager.getInstance().flush()
@@ -375,6 +376,9 @@ class MainActivity : AppCompatActivity() {
                 currentProgress = newProgress
                 if (newProgress >= 15) {
                     injectAppEnhancements(view)
+                }
+                if (newProgress >= 75) {
+                    dismissSplash()
                 }
                 if (newProgress >= 100) {
                     pageLoader.visibility = View.GONE
@@ -653,6 +657,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showOfflineScreen(view: WebView? = null) {
         wasOffline = true
+        dismissSplash()
         pageLoader.visibility = View.GONE
         try {
             (view ?: webView).stopLoading()
@@ -1056,18 +1061,13 @@ class MainActivity : AppCompatActivity() {
                     query.contains("status") ||
                     query.contains("order")
 
-            if (referrerTag == "app" || isPaymentOrOrder || (webView.url != null && webView.url != "about:blank")) {
-                val targetUrl = data.toString()
-                lastUrl = targetUrl
-                if (networkMonitor.isCurrentlyConnected()) {
-                    hideOfflineScreen()
-                    webView.loadUrl(targetUrl)
-                } else {
-                    showOfflineScreen(webView)
-                }
+            val targetUrl = data.toString()
+            lastUrl = targetUrl
+            if (networkMonitor.isCurrentlyConnected()) {
+                hideOfflineScreen()
+                webView.loadUrl(targetUrl)
             } else {
-                openInExternalBrowser(data)
-                finish()
+                showOfflineScreen(webView)
             }
         } else if (webView.url == null || webView.url == "about:blank") {
             if (networkMonitor.isCurrentlyConnected()) {

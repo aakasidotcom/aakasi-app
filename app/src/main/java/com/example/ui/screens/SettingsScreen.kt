@@ -71,7 +71,6 @@ fun SettingsScreen(
     val isSubscribedToAll by viewModel.isSubscribedToAll.collectAsState()
     val isSubscribedToOrders by viewModel.isSubscribedToOrders.collectAsState()
     val isSubscribedToAdminOrders by viewModel.isSubscribedToAdminOrders.collectAsState()
-    val textZoom by viewModel.textZoom.collectAsState()
 
     Scaffold(
         topBar = {
@@ -447,7 +446,7 @@ fun SettingsScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Default.TextFormat,
+                                Icons.Default.CleaningServices,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 modifier = Modifier.size(20.dp)
@@ -455,32 +454,9 @@ fun SettingsScreen(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Web View Text Size",
+                            text = "Web Cache & Storage",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        FilterChip(
-                            selected = textZoom == 100,
-                            onClick = { viewModel.setTextZoom(100) },
-                            label = { Text("Normal (100%)") }
-                        )
-                        FilterChip(
-                            selected = textZoom == 115,
-                            onClick = { viewModel.setTextZoom(115) },
-                            label = { Text("Large (115%)") }
-                        )
-                        FilterChip(
-                            selected = textZoom == 130,
-                            onClick = { viewModel.setTextZoom(130) },
-                            label = { Text("XL (130%)") }
                         )
                     }
 

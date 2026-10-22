@@ -60,7 +60,6 @@ fun HomeScreen(
     val errorState by viewModel.errorState.collectAsState()
     val isOffline by viewModel.isOffline.collectAsState()
     val reloadTrigger by viewModel.reloadTrigger.collectAsState()
-    val textZoom by viewModel.textZoom.collectAsState()
 
     val isLoading by viewModel.isLoading.collectAsState()
     val isInitialAppLoading by viewModel.isInitialAppLoading.collectAsState()
@@ -113,8 +112,7 @@ fun HomeScreen(
             onPageStarted = { url -> viewModel.onPageStarted(url) },
             onPageCommitVisible = { url -> viewModel.onPageCommitVisible(url) },
             onPageFinished = { url -> viewModel.onPageFinished(url) },
-            onErrorReceived = { errorMsg -> viewModel.setError(errorMsg) },
-            textZoomPercent = textZoom
+            onErrorReceived = { errorMsg -> viewModel.setError(errorMsg) }
         )
 
         // Small GIF loader centered on screen during page loading (stops when page reaches 1% loaded)

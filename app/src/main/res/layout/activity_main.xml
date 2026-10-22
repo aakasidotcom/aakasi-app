@@ -64,7 +64,9 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@android:color/white"
-        android:visibility="gone">
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="visible">
 
         <ImageView
             android:id="@+id/splash_image"
@@ -73,6 +75,8 @@
             android:src="@drawable/aakasi_app_splash_screen"
             android:scaleType="fitCenter"
             android:adjustViewBounds="true"
+            android:clickable="false"
+            android:focusable="false"
             android:contentDescription="Splash Screen" />
     </FrameLayout>
 

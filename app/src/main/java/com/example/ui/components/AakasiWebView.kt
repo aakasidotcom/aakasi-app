@@ -61,10 +61,6 @@ class WebViewController {
         webView?.clearHistory()
         CookieManager.getInstance().removeAllCookies(null)
     }
-
-    fun setTextZoom(zoomPercent: Int) {
-        webView?.settings?.textZoom = zoomPercent
-    }
 }
 
 @Composable
@@ -77,7 +73,6 @@ fun AakasiWebView(
     onPageCommitVisible: (String) -> Unit = {},
     onPageFinished: (String) -> Unit,
     onErrorReceived: (String) -> Unit,
-    textZoomPercent: Int = 100,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -152,8 +147,8 @@ fun AakasiWebView(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
 
-                // Optimize rendering and scrolling for low to high-end devices
-                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                // Optimize rendering and scrolling: LAYER_TYPE_NONE lets Chromium use internal GPU compositing
+                setLayerType(android.view.View.LAYER_TYPE_NONE, null)
                 isVerticalScrollBarEnabled = true
                 isHorizontalScrollBarEnabled = false
                 scrollBarStyle = android.view.View.SCROLLBARS_INSIDE_OVERLAY
@@ -175,7 +170,7 @@ fun AakasiWebView(
                     javaScriptCanOpenWindowsAutomatically = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     cacheMode = WebSettings.LOAD_DEFAULT
-                    textZoom = textZoomPercent
+                    textZoom = 100
                     userAgentString = userAgentString + " AakasiAndroidApp/1.0"
                     mediaPlaybackRequiresUserGesture = false
                     loadsImagesAutomatically = true
@@ -593,7 +588,6 @@ fun AakasiWebView(
         },
         update = { view ->
             controller.webView = view
-            view.settings.textZoom = textZoomPercent
         },
         modifier = modifier.fillMaxSize()
     )
