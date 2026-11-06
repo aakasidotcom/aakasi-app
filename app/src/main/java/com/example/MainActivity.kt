@@ -838,9 +838,26 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    private fun isTouchSoundEnabled(): Boolean {
+        return try {
+            Settings.System.getInt(
+                contentResolver,
+                Settings.System.SOUND_EFFECTS_ENABLED,
+                0
+            ) != 0
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private var lastSoundTimestamp = 0L
 
     fun playDefaultTouchSound() {
+        // Only play touch sound if user turned on touch sound feature in device settings
+        if (!isTouchSoundEnabled()) {
+            return
+        }
+
         val now = SystemClock.uptimeMillis()
         if (now - lastSoundTimestamp < 350L) {
             return
@@ -848,21 +865,12 @@ class MainActivity : AppCompatActivity() {
         lastSoundTimestamp = now
 
         runOnUiThread {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            val systemSoundEffectsEnabled = try {
-                Settings.System.getInt(
-                    contentResolver,
-                    Settings.System.SOUND_EFFECTS_ENABLED,
-                    0
-                ) != 0
-            } catch (_: Exception) {
-                false
+            if (!isTouchSoundEnabled()) {
+                return@runOnUiThread
             }
 
-            // Play exactly ONE sound source:
-            // If device default touch sounds are enabled in system settings, trigger native FX_KEY_CLICK.
-            // Otherwise, play the bundled touch click sound from SoundPool so feedback is audible.
-            if (systemSoundEffectsEnabled && audioManager != null) {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (audioManager != null) {
                 try {
                     audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK)
                 } catch (_: Exception) {
